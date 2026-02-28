@@ -1,0 +1,39 @@
+# Dockerfile.hook — Custom OpenClaw image with security tools
+# Built on top of the official OpenClaw Docker image
+#
+# BUILD:   docker build -f Dockerfile.hook -t hook-openclaw:latest .
+# RUN:     docker run -d --name hook -p 18789:18789 -v ~/.openclaw:/home/node/.openclaw hook-openclaw:latest
+#
+# NOTE: Do NOT build this until the base OpenClaw install is validated.
+#       This is a Phase 2 future enhancement.
+
+FROM ghcr.io/openclaw/openclaw:latest
+
+USER root
+
+# Install security analysis tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    jq \
+    dnsutils \
+    whois \
+    nmap \
+    coreutils \
+    grep \
+    gawk \
+    sed \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Verify installations
+RUN echo "=== Tool Verification ===" && \
+    jq --version && \
+    dig -v 2>&1 | head -1 && \
+    whois --version 2>&1 | head -1 && \
+    nmap --version 2>&1 | head -1 && \
+    echo "base64: $(base64 --version 2>&1 | head -1)" && \
+    echo "All tools installed successfully"
+
+USER node
+
+# Default command (same as base image)
+CMD ["openclaw", "gateway", "start"]

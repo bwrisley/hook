@@ -1,0 +1,152 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.2.0",
+    "lastTouchedAt": "2026-02-28T00:00:00Z"
+  },
+  "auth": {
+    "profiles": {
+      "openai:default": {
+        "provider": "openai",
+        "mode": "apikey"
+      }
+    }
+  },
+  "env": {
+    "VT_API_KEY": "YOUR_VIRUSTOTAL_API_KEY",
+    "CENSYS_API_ID": "YOUR_CENSYS_API_ID",
+    "CENSYS_API_SECRET": "YOUR_CENSYS_API_SECRET",
+    "ABUSEIPDB_API_KEY": "YOUR_ABUSEIPDB_API_KEY",
+    "shellEnv": {
+      "enabled": true
+    }
+  },
+  "tools": {
+    "profile": "full",
+    "exec": {
+      "backgroundMs": 30000,
+      "timeoutSec": 120
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openai/gpt-4.1"
+      },
+      "workspace": "~/.openclaw/workspace",
+      "compaction": true,
+      "maxConcurrent": 2,
+      "subagents": {
+        "maxConcurrent": 3,
+        "maxSpawnDepth": 1,
+        "maxChildrenPerAgent": 5,
+        "runTimeoutSeconds": 180,
+        "archiveAfterMinutes": 60
+      }
+    },
+    "list": [
+      {
+        "id": "coordinator",
+        "default": true,
+        "workspace": "HOOK_REPO_PATH/workspaces/coordinator",
+        "model": {
+          "primary": "openai/gpt-4.1"
+        },
+        "subagents": {
+          "allowAgents": [
+            "triage-analyst",
+            "osint-researcher",
+            "incident-responder",
+            "threat-intel",
+            "report-writer"
+          ]
+        }
+      },
+      {
+        "id": "triage-analyst",
+        "workspace": "HOOK_REPO_PATH/workspaces/triage-analyst",
+        "model": {
+          "primary": "openai/gpt-4.1"
+        }
+      },
+      {
+        "id": "osint-researcher",
+        "workspace": "HOOK_REPO_PATH/workspaces/osint-researcher",
+        "model": {
+          "primary": "openai/gpt-4.1"
+        }
+      },
+      {
+        "id": "incident-responder",
+        "workspace": "HOOK_REPO_PATH/workspaces/incident-responder",
+        "model": {
+          "primary": "openai/gpt-5"
+        }
+      },
+      {
+        "id": "threat-intel",
+        "workspace": "HOOK_REPO_PATH/workspaces/threat-intel",
+        "model": {
+          "primary": "openai/gpt-5"
+        }
+      },
+      {
+        "id": "report-writer",
+        "workspace": "HOOK_REPO_PATH/workspaces/report-writer",
+        "model": {
+          "primary": "openai/gpt-4.1"
+        }
+      }
+    ]
+  },
+  "bindings": [
+    {
+      "agentId": "coordinator",
+      "match": {
+        "channel": "slack"
+      }
+    }
+  ],
+  "messages": {
+    "ackReactionScope": "all"
+  },
+  "session": {
+    "dmScope": "user"
+  },
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "entries": {
+        "session-memory": {},
+        "command-logger": {}
+      }
+    }
+  },
+  "channels": {
+    "slack": {
+      "mode": "socket",
+      "enabled": true,
+      "botToken": "xoxb-YOUR-BOT-TOKEN",
+      "appToken": "xapp-YOUR-APP-TOKEN",
+      "streaming": true,
+      "nativeStreaming": false,
+      "channels": {
+        "#hook-test": {
+          "allow": true
+        }
+      }
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "127.0.0.1",
+    "controlUi": true
+  },
+  "plugins": {
+    "entries": {
+      "slack": {
+        "enabled": true
+      }
+    }
+  }
+}

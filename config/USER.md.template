@@ -1,0 +1,37 @@
+# USER.md — Client Environment Configuration
+
+## Organization
+- **Company Name:** [Your Organization]
+- **Industry:** [e.g., Financial Services, Healthcare, Technology]
+- **Size:** [e.g., 500 employees, 10,000 endpoints]
+
+## Security Stack
+- **SIEM:** [Sentinel / Splunk / Elastic / QRadar / etc.]
+- **EDR:** [CrowdStrike / Defender for Endpoint / Carbon Black / SentinelOne / etc.]
+- **Firewall:** [Palo Alto / Fortinet / Check Point / etc.]
+- **Email Security:** [Proofpoint / Mimecast / Microsoft Defender / etc.]
+- **Identity Provider:** [Entra ID / Okta / Ping / etc.]
+- **Cloud Platforms:** [Azure / AWS / GCP / none]
+- **Ticketing System:** [ServiceNow / Jira / etc.]
+
+## Network
+- **Internal IP Ranges:** [e.g., 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+- **Known Good Domains:** [e.g., company.com, company-cdn.com]
+- **Known Good IPs:** [e.g., VPN egress, mail servers]
+- **DNS Servers:** [internal DNS IPs]
+
+## Contacts
+- **SOC Lead:** [name / email / Slack handle]
+- **IR Lead:** [name / email / phone]
+- **CISO:** [name / email]
+- **Legal Contact:** [name / email]
+
+## Compliance Requirements
+- **Regulations:** [GDPR / HIPAA / PCI-DSS / SOX / CMMC / none]
+- **Breach Notification Window:** [e.g., 72 hours for GDPR]
+- **Data Classification:** [e.g., PII, PHI, financial data, IP]
+
+## Preferences
+- **Report Format:** [technical detail level preference]
+- **Escalation Threshold:** [what severity triggers human escalation]
+- **Working Hours:** [timezone and hours for non-critical alerts]

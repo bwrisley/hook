@@ -1,0 +1,43 @@
+# OpenClaw runtime
+.openclaw/
+sessions/
+*.jsonl
+*.deleted.*
+
+# API Keys and secrets
+.env
+*.key
+*.pem
+secrets/
+
+# Config with real keys (template is tracked, actual config is not)
+openclaw.json
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Node
+node_modules/
+npm-debug.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/

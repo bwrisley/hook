@@ -1,0 +1,30 @@
+# Test IOC List — Operation Frozen Ledger
+
+## IPs
+# C2 Server (Vultr VPS - test with real VT/Censys lookups)
+45.77.65.211
+# Secondary infrastructure (test domain)
+104.21.45.123
+# Internal (should be recognized as RFC1918 by triage)
+10.20.30.42
+10.20.30.10
+
+## Domains
+# Phishing/stager domain (likely not in VT - test graceful handling)
+update-check.finance-portal.com
+# Known malicious test domain (should flag)
+# Note: Use actual known-bad domains for real testing
+
+## Hashes
+# SHA256 of empty string (test placeholder - VT will return "not found")
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+# EICAR test file SHA256 (should be detected by all AV engines)
+275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f
+
+## URLs
+https://update-check.finance-portal.com/stager.ps1
+https://update-check.finance-portal.com/beacon.dll
+
+## Email Addresses
+jsmith@contoso.com
+attacker@protonmail.com
