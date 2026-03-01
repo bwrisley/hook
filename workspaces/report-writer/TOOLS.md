@@ -51,8 +51,11 @@ API keys available if enrichment verification is needed:
 - `$CENSYS_API_ID` / `$CENSYS_API_SECRET` — Censys
 - `$ABUSEIPDB_API_KEY` — AbuseIPDB
 
-## Container Constraints
+## Container Tools
 
-- No `jq` — use `python3 -c "..."` for JSON parsing
-- `curl` and `python3` are available
-- All API calls must use `exec` tool, NOT `web_fetch`
+**Custom image (hook-openclaw):** `curl`, `python3`, `jq`, `dig`, `whois`, `nmap`, `ping`, `traceroute`
+**Base image (openclaw):** `curl`, `python3` only
+
+The report-writer primarily reshapes content from other agents. You rarely need to run tools directly, but `jq` is available if you need to parse structured data passed in your task description.
+
+All API calls must use `exec` tool, NOT `web_fetch`.

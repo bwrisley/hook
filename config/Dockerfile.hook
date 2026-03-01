@@ -1,37 +1,40 @@
 # Dockerfile.hook — Custom OpenClaw image with security tools
 # Built on top of the official OpenClaw Docker image
 #
-# BUILD:   docker build -f Dockerfile.hook -t hook-openclaw:latest .
+# BUILD:   cd ~/PROJECTS/hook && ./config/build.sh
+# MANUAL:  docker build -f config/Dockerfile.hook -t hook-openclaw:latest config/
 # RUN:     docker run -d --name hook -p 18789:18789 -v ~/.openclaw:/home/node/.openclaw hook-openclaw:latest
 #
-# NOTE: Do NOT build this until the base OpenClaw install is validated.
-#       This is a Phase 2 future enhancement.
+# After building, update your gateway to use the custom image:
+#   openclaw gateway stop
+#   openclaw gateway start --image hook-openclaw:latest
 
-FROM ghcr.io/openclaw/openclaw:latest
+FROM ghcr.io/openclaw/openclaw:2026.2.26
 
 USER root
 
-# Install security analysis tools
+# Install security analysis tools not present in base image
 RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     dnsutils \
     whois \
     nmap \
-    coreutils \
-    grep \
-    gawk \
-    sed \
+    iputils-ping \
+    traceroute \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Verify installations
-RUN echo "=== Tool Verification ===" && \
-    jq --version && \
-    dig -v 2>&1 | head -1 && \
-    whois --version 2>&1 | head -1 && \
-    nmap --version 2>&1 | head -1 && \
-    echo "base64: $(base64 --version 2>&1 | head -1)" && \
-    echo "All tools installed successfully"
+RUN echo "=== HOOK Tool Verification ===" && \
+    echo "jq:        $(jq --version)" && \
+    echo "dig:       $(dig -v 2>&1 | head -1)" && \
+    echo "whois:     $(whois --version 2>&1 | head -1 || echo 'installed')" && \
+    echo "nmap:      $(nmap --version 2>&1 | head -1)" && \
+    echo "ping:      $(ping -V 2>&1 | head -1)" && \
+    echo "traceroute: $(traceroute --version 2>&1 | head -1 || echo 'installed')" && \
+    echo "curl:      $(curl --version 2>&1 | head -1)" && \
+    echo "python3:   $(python3 --version)" && \
+    echo "=== All tools verified ==="
 
 USER node
 

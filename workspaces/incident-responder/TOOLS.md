@@ -91,9 +91,55 @@ API keys available as environment variables:
 - `$CENSYS_API_SECRET` — Censys API Secret
 - `$ABUSEIPDB_API_KEY` — AbuseIPDB
 
-## Container Constraints
+## Network Reconnaissance
 
-- No `jq` — use `python3 -c "..."` for JSON parsing
-- No `dig` or `whois` — use python3 socket module
-- `curl` and `python3` are available
-- All API calls must use `exec` tool, NOT `web_fetch`
+### Port Scan — Quick (Top 100 ports)
+```bash
+nmap -T4 --top-ports 100 {IP}
+```
+
+### Port Scan — Specific Ports
+```bash
+nmap -p 22,80,443,445,3389,8080,8443 {IP}
+```
+
+### Service Version Detection
+```bash
+nmap -sV -p {PORT} {IP}
+```
+
+### Connectivity Check
+```bash
+ping -c 3 -W 2 {IP}
+```
+
+### Route Trace (identify network hops to C2)
+```bash
+traceroute -m 20 -w 2 {IP}
+```
+
+### DNS Lookups
+```bash
+# Reverse DNS for IP
+dig -x {IP} +short
+
+# Forward DNS for domain
+dig {DOMAIN} A +short
+
+# Check for DNS tunneling indicators (high TXT record volume)
+dig {DOMAIN} TXT +short
+```
+
+### WHOIS (IP ownership during IR)
+```bash
+whois {IP} | grep -iE "orgname|netname|country|cidr|descr|abuse"
+```
+
+**Note:** Use nmap judiciously during active IR — scanning attacker infrastructure may alert the threat actor. Prefer passive methods (VT, Censys, AbuseIPDB) when stealth matters.
+
+## Container Tools
+
+**Custom image (hook-openclaw):** `curl`, `python3`, `jq`, `dig`, `whois`, `nmap`, `ping`, `traceroute`
+**Base image (openclaw):** `curl`, `python3` only — network recon tools unavailable
+
+All API calls must use `exec` tool, NOT `web_fetch`.

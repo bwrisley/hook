@@ -181,59 +181,88 @@ if reports:
 
 ---
 
-## DNS Lookups (Python — no dig/whois in container)
+## DNS & WHOIS Lookups
 
 ### Forward DNS (A Record)
 ```bash
+dig {DOMAIN} A +short
+```
+
+### All DNS Records
+```bash
+dig {DOMAIN} ANY +noall +answer
+```
+
+### Reverse DNS
+```bash
+dig -x {IP} +short
+```
+
+### MX Records
+```bash
+dig {DOMAIN} MX +short
+```
+
+### NS Records
+```bash
+dig {DOMAIN} NS +short
+```
+
+### TXT Records (SPF, DKIM, DMARC)
+```bash
+dig {DOMAIN} TXT +short
+dig _dmarc.{DOMAIN} TXT +short
+```
+
+### WHOIS — Domain
+```bash
+whois {DOMAIN} | grep -iE "registrar|creation|expir|updated|name server|registrant|status"
+```
+
+### WHOIS — IP (Network Owner)
+```bash
+whois {IP} | grep -iE "orgname|netname|country|cidr|descr|origin"
+```
+
+### Fallbacks (if running base image without dig/whois)
+```bash
+# Forward DNS
 python3 -c "
 import socket
 try:
     results = socket.getaddrinfo('{DOMAIN}', None, socket.AF_INET)
     ips = set(r[4][0] for r in results)
-    for ip in sorted(ips):
-        print(f'A Record: {ip}')
-except Exception as e:
-    print(f'DNS Error: {e}')
+    for ip in sorted(ips): print(f'A Record: {ip}')
+except Exception as e: print(f'DNS Error: {e}')
 "
-```
 
-### Reverse DNS
-```bash
+# Reverse DNS
 python3 -c "
 import socket
 try:
     result = socket.gethostbyaddr('{IP}')
     print(f'PTR: {result[0]}')
-    if result[1]: print(f'Aliases: {\", \".join(result[1])}')
-except Exception as e:
-    print(f'Reverse DNS Error: {e}')
-"
-```
-
-### MX Records
-```bash
-python3 -c "
-import subprocess, re
-result = subprocess.run(['python3', '-c', '''
-import dns.resolver
-try:
-    answers = dns.resolver.resolve(\"{DOMAIN}\", \"MX\")
-    for r in answers:
-        print(f\"MX: {r.preference} {r.exchange}\")
-except Exception as e:
-    print(f\"MX lookup failed (dnspython not installed): {e}\")
-'''], capture_output=True, text=True)
-if result.stdout: print(result.stdout)
-else: print('MX lookup requires dnspython — not available in base container. Use custom Docker image.')
+except Exception as e: print(f'Reverse DNS Error: {e}')
 "
 ```
 
 ---
 
-## Container Constraints
+## Ad-Hoc JSON Inspection
 
-- No `jq` — always use `python3 -c "..."` for JSON parsing
-- No `dig`, `nslookup`, `whois` — use python3 socket module for basic DNS
-- No `nmap` — use curl or python3 for connectivity tests
-- `curl` and `python3` are available
-- All API calls must use `exec` tool, NOT `web_fetch`
+For quick inspection of raw API responses, use `jq`:
+```bash
+curl -s "https://www.virustotal.com/api/v3/ip_addresses/{IP}" \
+  -H "x-apikey: $VT_API_KEY" | jq '.data.attributes.last_analysis_stats'
+```
+
+The full API call scripts above use `python3` for structured extraction, which is still preferred for enrichment reports. Use `jq` when you need to quickly inspect a raw response or debug an API issue.
+
+---
+
+## Container Tools
+
+**Custom image (hook-openclaw):** `curl`, `python3`, `jq`, `dig`, `whois`, `nmap`, `ping`, `traceroute`
+**Base image (openclaw):** `curl`, `python3` only — use python3 fallbacks above
+
+All API calls must use `exec` tool, NOT `web_fetch` (Cloudflare blocks browser requests).

@@ -89,9 +89,14 @@ API keys are available as environment variables:
 
 Use `exec` tool with `curl` for all API calls. Do NOT use web_fetch.
 
-## Container Constraints
+## Container Tools
 
-- No `jq` — use `python3 -c "..."` for JSON parsing
-- No `dig` or `whois` — use python3 socket module
-- No `nmap` — use curl or python3 for port checks
-- `curl` and `python3` are available
+**Custom image (hook-openclaw):** `curl`, `python3`, `jq`, `dig`, `whois`, `nmap`, `ping`, `traceroute`
+**Base image (openclaw):** `curl`, `python3` only
+
+`jq` is available for quick JSON inspection during triage:
+```bash
+echo '$ALERT_JSON' | jq '.Entities[] | select(.Type == "ip")'
+```
+
+All API calls must use `exec` tool, NOT `web_fetch`.

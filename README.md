@@ -41,14 +41,16 @@ HOOK is a multi-agent SOC assistant built on [OpenClaw](https://github.com/openc
 2. Copy `config/openclaw.json.template` to `~/.openclaw/openclaw.json`
 3. Replace placeholders with your API keys and paths
 4. Configure Slack app (see `install/INSTALL.md`)
-5. Start OpenClaw: `openclaw gateway start`
-6. Test in Slack: `@HOOK Hello`
+5. Build custom Docker image: `./config/build.sh`
+6. Start OpenClaw: `openclaw gateway start --image hook-openclaw:latest`
+7. Test in Slack: `@HOOK Hello`
 
 Full installation guide: [install/INSTALL.md](install/INSTALL.md)
 
 ## Requirements
 
 - [OpenClaw](https://github.com/openclaw/openclaw) installed
+- Docker (for custom image with security tools)
 - OpenAI API key (GPT-4.1 + GPT-5)
 - VirusTotal API key (free tier)
 - Censys API credentials (free tier)
@@ -74,7 +76,8 @@ hook/
 ├── config/
 │   ├── openclaw.json.template
 │   ├── USER.md.template
-│   └── Dockerfile.hook      # Custom image (future)
+│   ├── Dockerfile.hook      # Custom image with jq/dig/whois/nmap
+│   └── build.sh             # Build script for custom image
 ├── tests/
 │   └── scenarios/
 │       └── operation-frozen-ledger.md
@@ -104,6 +107,7 @@ See [docs/RESEARCH-INTER-AGENT-ROUTING.md](docs/RESEARCH-INTER-AGENT-ROUTING.md)
 
 - **Phase 1 (CLINCH):** Prototype, proved the concept. [github.com/bwrisley/clinch](https://github.com/bwrisley/clinch)
 - **Phase 2 (HOOK):** Production rebuild with inter-agent routing, clean architecture, and full documentation.
+- **Phase 3 (HOOK):** Coordinator routing overhaul, custom Docker image, SOUL.md tuning, context passing improvements.
 
 ## License
 

@@ -112,9 +112,48 @@ API keys available as environment variables:
 - `$CENSYS_API_ID` / `$CENSYS_API_SECRET` — Censys
 - `$ABUSEIPDB_API_KEY` — AbuseIPDB
 
-## Container Constraints
+## Infrastructure Analysis
 
-- No `jq` — use `python3 -c "..."` for JSON parsing
-- No `dig` or `whois` — use python3 socket module
-- `curl` and `python3` are available
-- All API calls must use `exec` tool, NOT `web_fetch`
+### WHOIS — Domain (registrant, dates, registrar)
+```bash
+whois {DOMAIN} | grep -iE "registrar|creation|expir|updated|name server|registrant|status|country"
+```
+
+### WHOIS — IP (network ownership, hosting provider)
+```bash
+whois {IP} | grep -iE "orgname|netname|country|cidr|descr|origin|abuse"
+```
+
+### DNS Infrastructure Mapping
+```bash
+# Full DNS record set
+dig {DOMAIN} ANY +noall +answer
+
+# Name servers (hosting infrastructure)
+dig {DOMAIN} NS +short
+
+# Mail infrastructure
+dig {DOMAIN} MX +short
+
+# Check for fast-flux (multiple A records rotating)
+dig {DOMAIN} A +short
+```
+
+### Passive Infrastructure Pivoting
+```bash
+# Reverse DNS — what else is hosted on this IP?
+dig -x {IP} +short
+
+# TLS certificate subject from Censys (reveals related domains)
+curl -s -u "$CENSYS_API_ID:$CENSYS_API_SECRET" \
+  "https://search.censys.io/api/v2/hosts/{IP}" | jq '.result.services[].tls.certificates.leaf.parsed.subject'
+```
+
+Use these tools to identify infrastructure overlaps between campaigns — shared registrars, hosting providers, name servers, and certificate patterns are strong attribution signals.
+
+## Container Tools
+
+**Custom image (hook-openclaw):** `curl`, `python3`, `jq`, `dig`, `whois`, `nmap`, `ping`, `traceroute`
+**Base image (openclaw):** `curl`, `python3` only
+
+All API calls must use `exec` tool, NOT `web_fetch`.
