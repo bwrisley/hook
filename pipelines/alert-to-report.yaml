@@ -1,0 +1,45 @@
+# Alert-to-Report Pipeline — Extract IOCs, enrich all, generate report
+# The deterministic version of the triage → OSINT → report agent chain
+#
+# Usage (inline):
+#   lobster run --name alert-to-report --args-json '{"alert_text":"Suspicious connection from 45.77.65.211 to update-check.finance-portal.com..."}'
+#
+# Usage (file):
+#   lobster run --name alert-to-report --args-json '{"alert_file":"alerts/sentinel-alert-2026-03-01.json"}'
+#
+# This pipeline does NOT involve LLM judgment — it's pure enrichment + formatting.
+# For triage verdicts (TP/FP/Suspicious), use the triage-analyst agent instead.
+name: alert-to-report
+args:
+  alert_text:
+    default: ""
+  alert_file:
+    default: ""
+env:
+  VT_API_KEY: "${VT_API_KEY}"
+  ABUSEIPDB_API_KEY: "${ABUSEIPDB_API_KEY}"
+  CENSYS_API_ID: "${CENSYS_API_ID}"
+  CENSYS_API_SECRET: "${CENSYS_API_SECRET}"
+steps:
+  - id: ingest
+    command: |
+      if [ -n "${alert_file}" ] && [ -f "${alert_file}" ]; then
+        cat "${alert_file}"
+      elif [ -n "${alert_text}" ]; then
+        echo "${alert_text}"
+      else
+        echo '{"error": "No alert_text or alert_file provided"}' >&2
+        exit 1
+      fi
+
+  - id: extract
+    command: bash scripts/extract-iocs.sh
+    stdin: $ingest.stdout
+
+  - id: enrich
+    command: bash scripts/enrich-batch.sh
+    stdin: $extract.stdout
+
+  - id: report
+    command: bash scripts/format-report.sh
+    stdin: $enrich.stdout

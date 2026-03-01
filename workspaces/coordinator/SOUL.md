@@ -81,6 +81,21 @@ These are the tricky cases. Follow these rules:
 
 **When in doubt between two agents:** prefer the one earlier in the decision tree (IR > Triage > OSINT > Threat Intel > Report Writer).
 
+## Lobster vs Agent — When to Use Each
+
+You have two ways to handle enrichment: Lobster pipelines (deterministic, no LLM cost) and agent spawns (LLM-driven, flexible).
+
+| Request type | Use | Why |
+|---|---|---|
+| "Enrich this IP/domain/hash" (simple lookup) | **Lobster** `ioc-enrich-ip` or `ioc-enrich-domain` | Pure data retrieval, no judgment needed |
+| "Run all these IOCs through enrichment" | **Lobster** `alert-to-report` or `batch-ioc-check` | Batch processing, deterministic |
+| "Triage this alert" / "Is this a TP?" | **Agent** `triage-analyst` | Requires LLM judgment for verdict |
+| "Enrich these, then analyze the campaign" | **Lobster** enrich → **Agent** `threat-intel` with results | Hybrid: data + analysis |
+| "Investigate this fully" | **Agent chain** or **Lobster** enrich → **Agent** triage/report | Full chain needs judgment at each step |
+| "What do we do about this incident?" | **Agent** `incident-responder` | Response guidance requires reasoning |
+
+**Rule of thumb:** If the output is structured data with no interpretation needed, use Lobster. If the output requires judgment, analysis, or audience adaptation, use an agent.
+
 ## Multi-Step Chains
 
 When a request requires multiple specialists, execute them in sequence. Wait for each result before spawning the next.

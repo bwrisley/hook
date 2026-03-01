@@ -1,0 +1,40 @@
+# Batch IOC Check — Process a file of IOCs (one per line)
+# Good for scheduled/cron threat feed checks
+#
+# Usage:
+#   lobster run --name batch-ioc-check --args-json '{"ioc_file":"feeds/daily-iocs.txt"}'
+#
+# Input file format (one IOC per line):
+#   45.77.65.211
+#   evil-update.com
+#   e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+#
+# The pipeline auto-detects IOC type (IP/domain/hash) per line.
+name: batch-ioc-check
+args:
+  ioc_file:
+    required: true
+env:
+  VT_API_KEY: "${VT_API_KEY}"
+  ABUSEIPDB_API_KEY: "${ABUSEIPDB_API_KEY}"
+  CENSYS_API_ID: "${CENSYS_API_ID}"
+  CENSYS_API_SECRET: "${CENSYS_API_SECRET}"
+steps:
+  - id: read
+    command: cat "${ioc_file}"
+
+  - id: classify
+    command: bash scripts/extract-iocs.sh
+    stdin: $read.stdout
+
+  - id: enrich
+    command: bash scripts/enrich-batch.sh
+    stdin: $classify.stdout
+
+  - id: report
+    command: bash scripts/format-report.sh
+    stdin: $enrich.stdout
+
+  - id: summary
+    command: "python3 -c \"import json,sys; d=json.load(sys.stdin); s=d.get('summary',{}); high=s.get('high',0); print(json.dumps({'alert': high > 0, 'high_risk_count': high, 'total': s.get('total',0), 'report': d.get('report','')}, indent=2))\""
+    stdin: $report.stdout

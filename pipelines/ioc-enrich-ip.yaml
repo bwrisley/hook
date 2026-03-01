@@ -1,0 +1,17 @@
+# Single IP enrichment — VT + AbuseIPDB + Censys + DNS
+# Usage: lobster run --name ioc-enrich-ip --args-json '{"ip":"45.77.65.211"}'
+name: ioc-enrich-ip
+args:
+  ip:
+    required: true
+env:
+  VT_API_KEY: "${VT_API_KEY}"
+  ABUSEIPDB_API_KEY: "${ABUSEIPDB_API_KEY}"
+  CENSYS_API_ID: "${CENSYS_API_ID}"
+  CENSYS_API_SECRET: "${CENSYS_API_SECRET}"
+steps:
+  - id: enrich
+    command: bash scripts/enrich-ip.sh "${ip}"
+  - id: format
+    command: "python3 -c \"import json,sys; d=json.load(sys.stdin); r=d.get('risk','?'); ioc=d.get('ioc','?'); icon={'HIGH':'🔴','MEDIUM':'🟡','LOW':'🟢'}.get(r,'⚪'); print(json.dumps({'summary': f'{icon} {ioc} — {r} risk', 'details': d}, indent=2))\""
+    stdin: $enrich.stdout
