@@ -80,19 +80,31 @@ hook/
 │   └── batch-ioc-check.yaml
 ├── scripts/                 # Pipeline helper scripts (hardened)
 │   ├── lib/
-│   │   └── common.py       # Shared validation, rate limiting, logging
+│   │   ├── common.py       # Shared validation, rate limiting, logging
+│   │   └── slack-notify.sh # Post messages to Slack from scripts
 │   ├── enrich-ip.sh
 │   ├── enrich-domain.sh
 │   ├── enrich-hash.sh
 │   ├── extract-iocs.sh
 │   ├── enrich-batch.sh
 │   ├── format-report.sh
-│   └── health-check.sh     # Environment validation
+│   ├── health-check.sh     # Environment validation
+│   ├── fetch-feeds.sh      # Pull IOCs from threat feeds
+│   ├── watchlist.sh         # Persistent IOC watchlist manager
+│   ├── daily-check.sh      # Automated daily threat check (cron)
+│   ├── morning-briefing.sh # Morning Slack summary
+│   └── schedule-install.sh # Install/uninstall macOS LaunchAgents
+├── data/                    # Dynamic data (gitignored)
+│   ├── feeds/              # Downloaded threat feed IOCs
+│   ├── reports/            # Daily enrichment reports
+│   └── watchlist.txt       # Persistent IOC watchlist
 ├── config/
 │   ├── openclaw.json.template
 │   ├── USER.md.template
 │   ├── Dockerfile.hook      # Custom image with jq/dig/whois/nmap
-│   └── build.sh             # Build script for custom image
+│   ├── build.sh             # Build script for custom image
+│   ├── ai.openclaw.hook-daily.plist    # LaunchAgent: daily threat check
+│   └── ai.openclaw.hook-briefing.plist # LaunchAgent: morning briefing
 ├── tests/
 │   └── scenarios/
 │       └── operation-frozen-ledger.md
