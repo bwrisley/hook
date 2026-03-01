@@ -29,93 +29,23 @@ Available agent IDs:
 - You can spawn multiple specialists in parallel if tasks are independent
 - For sequential chains (triage → enrich → report), wait for results before spawning next
 
-## Quick Enrichment (Direct — No Specialist Needed)
+## Quick Enrichment — DO NOT SELF-HANDLE
 
-For simple, single-IOC lookups you can run directly without spawning an agent:
+**Never run enrichment queries directly.** Even for a single IOC, always spawn `osint-researcher`. The specialist has multi-source enrichment (VT + Censys + AbuseIPDB + DNS), structured output, and risk assessment logic. A coordinator-run VT-only lookup is incomplete and trains bad habits.
 
-### VirusTotal IP Lookup
-```bash
-curl -s "https://www.virustotal.com/api/v3/ip_addresses/{IP}" \
-  -H "x-apikey: $VT_API_KEY" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-attrs = d.get('data', {}).get('attributes', {})
-stats = attrs.get('last_analysis_stats', {})
-print(f'IP: {d[\"data\"][\"id\"]}')
-print(f'Malicious: {stats.get(\"malicious\", 0)}')
-print(f'Suspicious: {stats.get(\"suspicious\", 0)}')
-print(f'Harmless: {stats.get(\"harmless\", 0)}')
-print(f'Country: {attrs.get(\"country\", \"N/A\")}')
-print(f'AS Owner: {attrs.get(\"as_owner\", \"N/A\")}')
-"
+If the user asks to "just quickly check" a single IOC, spawn osint-researcher with a note that it's a single-IOC fast lookup:
+
 ```
-
-### VirusTotal Domain Lookup
-```bash
-curl -s "https://www.virustotal.com/api/v3/domains/{DOMAIN}" \
-  -H "x-apikey: $VT_API_KEY" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-attrs = d.get('data', {}).get('attributes', {})
-stats = attrs.get('last_analysis_stats', {})
-print(f'Domain: {d[\"data\"][\"id\"]}')
-print(f'Malicious: {stats.get(\"malicious\", 0)}')
-print(f'Registrar: {attrs.get(\"registrar\", \"N/A\")}')
-print(f'Creation: {attrs.get(\"creation_date\", \"N/A\")}')
-"
-```
-
-### VirusTotal Hash Lookup
-```bash
-curl -s "https://www.virustotal.com/api/v3/files/{HASH}" \
-  -H "x-apikey: $VT_API_KEY" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-attrs = d.get('data', {}).get('attributes', {})
-stats = attrs.get('last_analysis_stats', {})
-print(f'Hash: {d[\"data\"][\"id\"]}')
-print(f'Malicious: {stats.get(\"malicious\", 0)}')
-print(f'File Type: {attrs.get(\"type_description\", \"N/A\")}')
-print(f'Names: {\", \".join(attrs.get(\"names\", [])[:])}')
-"
+sessions_spawn(
+  agentId: "osint-researcher",
+  task: "Quick enrichment — single IOC. Enrich the following IP and return structured findings: 1.2.3.4",
+  runTimeoutSeconds: 90
+)
 ```
 
 ## Shell Environment
 
-API keys are available as environment variables:
-- `$VT_API_KEY` — VirusTotal
-- `$CENSYS_API_ID` — Censys API ID
-- `$CENSYS_API_SECRET` — Censys API Secret
-- `$ABUSEIPDB_API_KEY` — AbuseIPDB
+The coordinator does NOT run API calls or enrichment queries directly. The following environment variables exist for specialist agents only:
+- `$VT_API_KEY`, `$CENSYS_API_ID`, `$CENSYS_API_SECRET`, `$ABUSEIPDB_API_KEY`
 
-Use `exec` tool with `curl` for all API calls. Do NOT use web_fetch — external APIs block browser-style requests.
-
-## JSON Parsing
-
-The container does NOT have `jq`. Always pipe curl output to `python3 -c "..."` for JSON parsing.
-
-## DNS Lookups
-
-The container does NOT have `dig` or `whois`. Use python3:
-```bash
-python3 -c "
-import socket
-try:
-    result = socket.gethostbyname('example.com')
-    print(f'A Record: {result}')
-except Exception as e:
-    print(f'Error: {e}')
-"
-```
-
-For reverse DNS:
-```bash
-python3 -c "
-import socket
-try:
-    result = socket.gethostbyaddr('8.8.8.8')
-    print(f'Hostname: {result[0]}')
-except Exception as e:
-    print(f'Error: {e}')
-"
-```
+If you need enrichment, DNS lookups, or JSON parsing — spawn the right specialist. That's what they're for.

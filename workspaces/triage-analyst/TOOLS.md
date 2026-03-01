@@ -35,9 +35,9 @@ if emails: print(f'Emails: {\", \".join(sorted(emails))}')
 "
 ```
 
-## Quick VirusTotal Check (Inline)
+## Quick VirusTotal Check (Inline — Triage Only)
 
-If you need a fast reputation check during triage:
+Use these ONLY when a quick reputation check directly affects your triage verdict (e.g., confirming a hash is known-malicious changes Suspicious → TP). Do NOT run full multi-source enrichment — that's the OSINT researcher's job. If enrichment is needed, say so in your recommendations.
 
 ### IP Reputation
 ```bash
