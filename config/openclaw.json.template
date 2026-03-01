@@ -16,7 +16,7 @@
     "profile": "full",
     "exec": {
       "backgroundMs": 30000,
-      "timeoutSec": 120
+      "timeoutSec": 180
     }
   },
   "agents": {
@@ -30,7 +30,7 @@
         "maxConcurrent": 3,
         "maxSpawnDepth": 1,
         "maxChildrenPerAgent": 5,
-        "runTimeoutSeconds": 180,
+        "runTimeoutSeconds": 300,
         "archiveAfterMinutes": 60
       }
     },
@@ -100,9 +100,7 @@
   "messages": {
     "ackReactionScope": "all"
   },
-  "session": {
-    "dmScope": "user"
-  },
+  "session": {},
   "hooks": {
     "internal": {
       "enabled": true,
@@ -118,7 +116,6 @@
       "enabled": true,
       "botToken": "xoxb-YOUR-BOT-TOKEN",
       "appToken": "xapp-YOUR-APP-TOKEN",
-      "streaming": true,
       "nativeStreaming": false,
       "channels": {
         "#hook-test": {
@@ -130,8 +127,9 @@
   "gateway": {
     "port": 18789,
     "mode": "local",
-    "bind": "127.0.0.1",
-    "controlUi": true
+    "controlUi": {
+      "enabled": true
+    }
   },
   "plugins": {
     "entries": {
