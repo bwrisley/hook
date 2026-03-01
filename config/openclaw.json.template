@@ -1,15 +1,7 @@
 {
   "meta": {
-    "lastTouchedVersion": "2026.2.0",
-    "lastTouchedAt": "2026-02-28T00:00:00Z"
-  },
-  "auth": {
-    "profiles": {
-      "openai:default": {
-        "provider": "openai",
-        "mode": "apikey"
-      }
-    }
+    "lastTouchedVersion": "2026.2.26",
+    "lastTouchedAt": "2026-03-01T00:00:00Z"
   },
   "env": {
     "VT_API_KEY": "YOUR_VIRUSTOTAL_API_KEY",
@@ -33,7 +25,6 @@
         "primary": "openai/gpt-4.1"
       },
       "workspace": "~/.openclaw/workspace",
-      "compaction": true,
       "maxConcurrent": 2,
       "subagents": {
         "maxConcurrent": 3,

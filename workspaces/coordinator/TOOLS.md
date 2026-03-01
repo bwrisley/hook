@@ -24,10 +24,69 @@ Available agent IDs:
 - `report-writer` — Reports for any audience
 
 ### Important Notes
-- `sessions_spawn` is non-blocking — it returns immediately with `{ status: "accepted" }`
+- `sessions_spawn` is non-blocking — it returns immediately with `{ status: "accepted", runId, childSessionKey }`
+- **Save the `childSessionKey`** — you need it to read results via `sessions_history`
 - The specialist will announce results back to the Slack channel when complete
 - You can spawn multiple specialists in parallel if tasks are independent
-- For sequential chains (triage → enrich → report), wait for results before spawning next
+- For sequential chains (triage → enrich → report), wait for announce before spawning next
+
+### Read Subagent Results
+After a subagent announces back, you can get the full transcript if the announce text is truncated or you need specific details:
+
+```
+sessions_history(
+  sessionKey: "<childSessionKey from sessions_spawn>",
+  limit: 10
+)
+```
+
+This returns the subagent's full conversation including tool calls and outputs. Use it when:
+- The announce text is truncated or missing detail
+- You need to extract specific data points (e.g., exact VT scores) for the next chain step
+- You want to verify what the subagent actually did
+
+### List Active Subagents
+```
+sessions_list()
+```
+Check which subagents are still running or have completed.
+
+## Investigation State Files
+
+For multi-step investigations, write a state file to track chain progress. This survives context compaction and gives you a persistent record.
+
+### Write State
+```
+exec: cat > investigation-state.md << 'EOF'
+# Investigation: Suspicious PowerShell on WKSTN-FIN-042
+## Status: in-progress
+## Started: 2026-03-01T14:30:00Z
+
+### Chain Progress
+- [x] Triage: TP, High confidence
+- [ ] OSINT: Pending
+- [ ] Report: Pending
+
+### Accumulated Findings
+Triage verdict: True Positive (85% confidence)
+ATT&CK: T1059.001 (PowerShell), T1071.001 (Web Protocols)
+
+### Extracted IOCs
+| IOC | Type | Risk | Source |
+|-----|------|------|--------|
+| 45.77.65.211 | IP | TBD | Triage extraction |
+
+### Next Step
+Spawn osint-researcher for IOC enrichment
+EOF
+```
+
+### Read State
+```
+exec: cat investigation-state.md
+```
+
+Read the state file at the start of each chain step to recover context. Update it after each subagent announces back.
 
 ## Quick Enrichment — DO NOT SELF-HANDLE
 
@@ -48,4 +107,4 @@ sessions_spawn(
 The coordinator does NOT run API calls or enrichment queries directly. The following environment variables exist for specialist agents only:
 - `$VT_API_KEY`, `$CENSYS_API_ID`, `$CENSYS_API_SECRET`, `$ABUSEIPDB_API_KEY`
 
-If you need enrichment, DNS lookups, or JSON parsing — spawn the right specialist. That's what they're for.
+The coordinator CAN use `exec` for file operations (reading/writing investigation state files) and basic utilities. Do NOT use `exec` for API calls or enrichment — spawn the right specialist.

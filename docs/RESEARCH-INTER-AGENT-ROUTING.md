@@ -268,13 +268,13 @@ Coordinator Agent (default, receives all messages)
 
 ## Open Questions for Implementation
 
-1. **Will subagent exec have access to env vars (API keys)?** — Need to test. The coordinator's `shellEnv` should propagate but verify.
+1. **Will subagent exec have access to env vars (API keys)?** — ✅ **ANSWERED (Phase 2):** Yes. The coordinator's `env` config propagates to subagents when sandbox is off (exec runs on host). All agents have access to `$VT_API_KEY`, `$CENSYS_API_ID`, `$CENSYS_API_SECRET`, `$ABUSEIPDB_API_KEY`. When sandboxing is enabled, env vars must be passed via `agents.defaults.sandbox.docker.env`.
 
-2. **How does subagent announce format in Slack?** — Need to see if it's clean or needs formatting in the announce step.
+2. **How does subagent announce format in Slack?** — ✅ **ANSWERED (Phase 3):** Announces appear as system messages in the chat channel with a normalized template: Status (success/error/timeout) + Result (the subagent's summary text). Formatting is clean enough to read and extract findings from.
 
-3. **Can coordinator read subagent results programmatically?** — Or does it only see the announce text in chat? If the latter, chaining workflows requires careful prompt engineering.
+3. **Can coordinator read subagent results programmatically?** — ✅ **ANSWERED (Phase 3):** Yes, two methods: (a) The announce callback is delivered as a system message to the coordinator's chat — passive receipt. (b) `sessions_history(childSessionKey)` returns the full subagent transcript including tool calls — active retrieval. The `childSessionKey` is returned by `sessions_spawn` in the response object.
 
-4. **Tool allowlist inheritance** — Verify subagents get `exec` by default. May need explicit `tools.subagents.tools.allow: ["exec", "read", "write"]`.
+4. **Tool allowlist inheritance** — ✅ **ANSWERED (Phase 2):** Subagents get all tools except session tools (`sessions_spawn`, `sessions_list`, `sessions_history`, `sessions_send`) and system tools (`gateway`, `cron`). This means specialist agents DO get `exec`, `read`, `write`, `edit` by default. No explicit `tools.subagents.tools.allow` needed for HOOK's current setup.
 
 ---
 

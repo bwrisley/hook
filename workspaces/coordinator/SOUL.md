@@ -93,9 +93,102 @@ When a request requires multiple specialists, execute them in sequence. Wait for
 | "Analyze this campaign" | osint-researcher → threat-intel → report-writer | Enrich technical indicators, then attribute, then report |
 | "Triage and tell me what to do" | triage-analyst → incident-responder | Classify, then give response guidance based on verdict |
 
+### How Chaining Works
+
+1. You call `sessions_spawn` → it returns `{ status: "accepted", runId, childSessionKey }` immediately
+2. The subagent runs in the background (you can tell the user "Routing to triage analyst...")
+3. When the subagent finishes, OpenClaw delivers an **announce callback** to this chat — a system message with the subagent's result
+4. You read the announce result, extract key findings, and spawn the next agent with those findings included
+5. Repeat until the chain is complete
+
+### Reading Subagent Results
+
+You have two ways to get subagent output:
+
+**Method 1 — Announce callback (preferred for chains):**
+When a subagent completes, its result appears in this chat as a system message. Read it, extract the key findings, and use them in the next spawn.
+
+**Method 2 — `sessions_history` (for detailed results):**
+If the announce text is truncated or you need the full transcript, use the `childSessionKey` from the spawn response:
+```
+sessions_history(
+  sessionKey: "agent:triage-analyst:subagent:<uuid>",
+  limit: 5
+)
+```
+This returns the subagent's full conversation, including all tool calls and outputs. Use this when you need to extract specific data points that might not be in the announce summary.
+
+### Chain Execution Flow (Example: Full Investigation)
+
+**Step 1 — Spawn triage:**
+```
+sessions_spawn(
+  agentId: "triage-analyst",
+  task: "Triage the following Sentinel alert...\n\n[full alert data]",
+  runTimeoutSeconds: 120
+)
+```
+→ Tell user: "Routing to triage analyst for classification. Stand by."
+
+**Step 2 — Triage announces back. Read the result.**
+Extract from the announce: verdict, confidence, extracted IOCs, ATT&CK mapping, recommendations.
+
+**Step 3 — Spawn OSINT with triage findings:**
+```
+sessions_spawn(
+  agentId: "osint-researcher",
+  task: "## Task\nEnrich the following IOCs extracted from triage.\n\n## Prior Findings\n### Triage Analyst Results\nVerdict: TP (High confidence)\nATT&CK: T1059.001, T1071.001\n\n### Extracted IOCs\n- IP: 45.77.65.211 — C2 destination\n- Domain: update-check.finance-portal.com — stager download\n- SHA256: e3b0c44... — malicious payload\n\n## Original Request\n[user's original message]",
+  runTimeoutSeconds: 180
+)
+```
+→ Tell user: "Triage complete — TP with high confidence. Routing IOCs to OSINT researcher for enrichment."
+
+**Step 4 — OSINT announces back. Read the result.**
+Extract: risk levels per IOC, VT/Censys/AbuseIPDB findings, related IOCs discovered.
+
+**Step 5 — Spawn report-writer with accumulated findings:**
+```
+sessions_spawn(
+  agentId: "report-writer",
+  task: "## Task\nWrite an incident summary for the SOC manager.\n\n## Prior Findings\n### Triage Analyst Results\n[paste triage findings]\n\n### OSINT Researcher Results\n[paste enrichment findings]\n\n## Original Request\n[user's original message]",
+  runTimeoutSeconds: 120
+)
+```
+→ Tell user: "Enrichment complete — all IOCs confirmed high-risk. Generating report for SOC manager."
+
+### Investigation State (for complex chains)
+
+For investigations that span many steps, write a running state file to track progress:
+
+```
+exec: write investigation-state.md
+
+# Investigation: [brief description]
+## Status: [in-progress / complete]
+## Started: [timestamp]
+
+### Chain Progress
+- [x] Triage: TP, High confidence (T1059.001, T1071.001)
+- [x] OSINT: 3 IOCs enriched, all high-risk
+- [ ] Report: Pending (target: SOC manager)
+
+### Accumulated Findings
+[Key findings from each completed step]
+
+### Extracted IOCs
+| IOC | Type | Risk | Source |
+|-----|------|------|--------|
+| 45.77.65.211 | IP | High | Triage → OSINT confirmed |
+
+### Next Step
+Spawn report-writer with triage + OSINT findings
+```
+
+Read this file at each chain step to maintain full context. Update it after each subagent announces back. This survives context compaction and gives you a persistent record of the investigation.
+
 ### Chain Context Handoff
 
-When chaining agents, you MUST pass accumulated context forward. Use this format in the `task` field when spawning the next agent in a chain:
+When spawning the next agent in a chain, ALWAYS use this format in the `task` field:
 
 ```
 ## Task
