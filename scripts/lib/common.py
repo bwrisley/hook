@@ -1,5 +1,5 @@
 """
-HOOK shared library — validation, rate limiting, logging, safe execution.
+HOOK shared library — validation, rate limiting, logging, caching, safe execution.
 Imported by all enrichment scripts via: exec(open('scripts/lib/common.py').read())
 
 This file is designed to be exec()'d into the caller's namespace, not imported,
@@ -14,10 +14,17 @@ import sys
 import time
 from datetime import datetime, timezone
 
-# ─── Logging ────────────────────────────────────────────────────────
+# --- Paths (container-ready: all configurable via env vars) ---------------
 
+# script_dir is set by the calling script before exec()'ing this file
+_caller_script_dir = locals().get('script_dir', os.getcwd())
+HOOK_DIR = os.environ.get('HOOK_DIR', os.path.dirname(_caller_script_dir))
+HOOK_DATA_DIR = os.environ.get('HOOK_DATA_DIR', os.path.join(HOOK_DIR, 'data'))
 LOG_DIR = os.environ.get('HOOK_LOG_DIR', os.path.expanduser('~/.openclaw/logs/hook'))
 LOG_ENABLED = os.environ.get('HOOK_LOG_ENABLED', '1') == '1'
+CACHE_DIR = os.environ.get('HOOK_CACHE_DIR', os.path.join(HOOK_DATA_DIR, 'cache'))
+
+# --- Logging --------------------------------------------------------------
 
 def _ensure_log_dir():
     if LOG_ENABLED:
@@ -52,7 +59,7 @@ def log_warn(script, message, data=None):
 def log_error(script, message, data=None):
     log('ERROR', script, message, data)
 
-# ─── Input Validation ───────────────────────────────────────────────
+# --- Input Validation -----------------------------------------------------
 
 _IP_RE = re.compile(r'^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$')
 _DOMAIN_RE = re.compile(r'^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$')
@@ -83,7 +90,145 @@ def validate_hash(file_hash):
         raise ValueError(f'Hash length {len(file_hash)} not valid (expected 32/40/64)')
     return file_hash
 
-# ─── Rate Limiting ──────────────────────────────────────────────────
+# --- IOC Cache ------------------------------------------------------------
+
+# TTLs in hours — configurable via env vars
+CACHE_TTL = {
+    'ip':     int(os.environ.get('HOOK_CACHE_TTL_IP', '24')),
+    'domain': int(os.environ.get('HOOK_CACHE_TTL_DOMAIN', '72')),
+    'hash':   int(os.environ.get('HOOK_CACHE_TTL_HASH', '168')),
+}
+
+def _cache_key(ioc_type, ioc_value):
+    """Generate a safe filename from IOC type and value."""
+    # Replace filesystem-unsafe chars
+    safe = re.sub(r'[^a-zA-Z0-9._\-]', '_', ioc_value)
+    return os.path.join(CACHE_DIR, ioc_type, safe + '.json')
+
+def cache_get(ioc_type, ioc_value):
+    """Check cache for a fresh enrichment result.
+    Returns (result_dict, True) if cached and fresh, (None, False) if stale/missing."""
+    path = _cache_key(ioc_type, ioc_value)
+    try:
+        with open(path, 'r') as f:
+            entry = json.load(f)
+        cached_at = datetime.fromisoformat(entry['cached_at'])
+        ttl_hours = entry.get('ttl_hours', CACHE_TTL.get(ioc_type, 24))
+        age_hours = (datetime.now(timezone.utc) - cached_at).total_seconds() / 3600
+        if age_hours < ttl_hours:
+            result = entry['result']
+            result['_cache'] = {
+                'hit': True,
+                'cached_at': entry['cached_at'],
+                'age_hours': round(age_hours, 1),
+                'ttl_hours': ttl_hours
+            }
+            log_info('cache', f'Cache hit for {ioc_type}:{ioc_value}', {
+                'age_hours': round(age_hours, 1),
+                'ttl_hours': ttl_hours
+            })
+            return result, True
+        else:
+            log_info('cache', f'Cache stale for {ioc_type}:{ioc_value}', {
+                'age_hours': round(age_hours, 1),
+                'ttl_hours': ttl_hours
+            })
+            return None, False
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        return None, False
+
+def cache_put(ioc_type, ioc_value, result):
+    """Store an enrichment result in cache."""
+    path = _cache_key(ioc_type, ioc_value)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    entry = {
+        'cached_at': datetime.now(timezone.utc).isoformat(),
+        'ttl_hours': CACHE_TTL.get(ioc_type, 24),
+        'ioc_type': ioc_type,
+        'ioc_value': ioc_value,
+        'result': result
+    }
+    try:
+        with open(path, 'w') as f:
+            json.dump(entry, f, indent=2)
+        log_info('cache', f'Cached result for {ioc_type}:{ioc_value}')
+    except Exception as e:
+        log_warn('cache', f'Failed to cache {ioc_type}:{ioc_value}: {e}')
+
+def cache_lookup(ioc_value):
+    """Auto-detect IOC type and look up in cache. Returns (result, hit, ioc_type)."""
+    if _IP_RE.match(ioc_value):
+        result, hit = cache_get('ip', ioc_value)
+        return result, hit, 'ip'
+    elif _HASH_RE.match(ioc_value) and len(ioc_value) in (32, 40, 64):
+        result, hit = cache_get('hash', ioc_value)
+        return result, hit, 'hash'
+    elif _DOMAIN_RE.match(ioc_value):
+        result, hit = cache_get('domain', ioc_value)
+        return result, hit, 'domain'
+    return None, False, 'unknown'
+
+def cache_stats():
+    """Return cache statistics."""
+    stats = {'total': 0, 'by_type': {}, 'fresh': 0, 'stale': 0}
+    now = datetime.now(timezone.utc)
+    for ioc_type in ['ip', 'domain', 'hash']:
+        type_dir = os.path.join(CACHE_DIR, ioc_type)
+        count = 0
+        fresh = 0
+        stale = 0
+        if os.path.isdir(type_dir):
+            for fname in os.listdir(type_dir):
+                if not fname.endswith('.json'):
+                    continue
+                count += 1
+                try:
+                    with open(os.path.join(type_dir, fname), 'r') as f:
+                        entry = json.load(f)
+                    cached_at = datetime.fromisoformat(entry['cached_at'])
+                    ttl = entry.get('ttl_hours', CACHE_TTL.get(ioc_type, 24))
+                    age = (now - cached_at).total_seconds() / 3600
+                    if age < ttl:
+                        fresh += 1
+                    else:
+                        stale += 1
+                except Exception:
+                    stale += 1
+        stats['by_type'][ioc_type] = {'total': count, 'fresh': fresh, 'stale': stale}
+        stats['total'] += count
+        stats['fresh'] += fresh
+        stats['stale'] += stale
+    stats['cache_dir'] = CACHE_DIR
+    return stats
+
+def cache_clear(ioc_type=None, stale_only=False):
+    """Clear cache entries. Returns count of files removed."""
+    removed = 0
+    now = datetime.now(timezone.utc)
+    types = [ioc_type] if ioc_type else ['ip', 'domain', 'hash']
+    for t in types:
+        type_dir = os.path.join(CACHE_DIR, t)
+        if not os.path.isdir(type_dir):
+            continue
+        for fname in os.listdir(type_dir):
+            if not fname.endswith('.json'):
+                continue
+            fpath = os.path.join(type_dir, fname)
+            if stale_only:
+                try:
+                    with open(fpath, 'r') as f:
+                        entry = json.load(f)
+                    cached_at = datetime.fromisoformat(entry['cached_at'])
+                    ttl = entry.get('ttl_hours', CACHE_TTL.get(t, 24))
+                    if (now - cached_at).total_seconds() / 3600 < ttl:
+                        continue  # Still fresh, skip
+                except Exception:
+                    pass  # Can't read it, remove it
+            os.remove(fpath)
+            removed += 1
+    return removed
+
+# --- Rate Limiting --------------------------------------------------------
 
 RATE_LIMIT_DIR = os.path.join(LOG_DIR, '.ratelimit')
 
@@ -139,7 +284,7 @@ def rate_limit_wait(api_name):
 
     log_warn(api_name, 'Rate limit wait exceeded 120s, proceeding anyway')
 
-# ─── Safe Execution ─────────────────────────────────────────────────
+# --- Safe Execution -------------------------------------------------------
 
 def curl_json(args, api_name=None, timeout=15):
     """Execute curl and parse JSON response. Rate-limited if api_name provided."""
@@ -184,7 +329,7 @@ def run_cmd(cmd, timeout=5):
         log_error('cmd', f'{cmd[0]} error: {e}')
         return ''
 
-# ─── Output ─────────────────────────────────────────────────────────
+# --- Output ---------------------------------------------------------------
 
 def output_json(data):
     """Print JSON to stdout (the script's return value)."""

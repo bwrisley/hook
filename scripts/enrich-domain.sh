@@ -1,26 +1,44 @@
 #!/bin/bash
 # enrich-domain.sh — Multi-source domain enrichment (VT + DNS + WHOIS)
 # Usage: ./scripts/enrich-domain.sh <DOMAIN>
+#        ./scripts/enrich-domain.sh --no-cache <DOMAIN>    (skip cache, force live)
 # Output: JSON object with combined findings
 # Requires: $VT_API_KEY
 
 set -euo pipefail
 
-DOMAIN="${1:?Usage: enrich-domain.sh <DOMAIN>}"
+NO_CACHE=0
+if [ "${1:-}" = "--no-cache" ]; then
+    NO_CACHE=1
+    shift
+fi
+
+DOMAIN="${1:?Usage: enrich-domain.sh [--no-cache] <DOMAIN>}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-python3 - "$DOMAIN" "$SCRIPT_DIR" <<'PYEOF'
+python3 - "$DOMAIN" "$SCRIPT_DIR" "$NO_CACHE" <<'PYEOF'
 import sys, os
 
+domain_arg = sys.argv[1]
 script_dir = sys.argv[2]
+no_cache = sys.argv[3] == '1'
+
 exec(open(os.path.join(script_dir, 'lib', 'common.py')).read())
 
 SCRIPT = 'enrich-domain'
 
 try:
-    domain = validate_domain(sys.argv[1])
+    domain = validate_domain(domain_arg)
 except ValueError as e:
-    error_exit(SCRIPT, str(e), sys.argv[1][:80])
+    error_exit(SCRIPT, str(e), domain_arg[:80])
+
+# Check cache first
+if not no_cache:
+    cached, hit = cache_get('domain', domain)
+    if hit:
+        log_info(SCRIPT, f'Cache hit for {domain}')
+        output_json(cached)
+        sys.exit(0)
 
 log_info(SCRIPT, f'Starting enrichment for {domain}')
 results = {'ioc': domain, 'type': 'domain', 'sources': {}}
@@ -85,6 +103,9 @@ elif vt_mal > 0:
     results['risk'] = 'MEDIUM'
 else:
     results['risk'] = 'LOW'
+
+# Cache the result
+cache_put('domain', domain, results)
 
 log_info(SCRIPT, f'Enrichment complete for {domain}', {'risk': results['risk']})
 output_json(results)

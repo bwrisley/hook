@@ -44,3 +44,19 @@ logs/
 *.tar
 *.tar.gz
 TEST_SLACK.txt
+
+# Phase 6: Runtime data
+data/faiss/
+data/hook-web.db
+data/investigations/
+
+# Phase 6: Frontend build
+web/dist/
+web/node_modules/
+
+# Phase 6: Test results
+tests/results/
+
+# Misc
+*.old
+#hook

@@ -14,7 +14,7 @@ A complete, start-to-finish guide to setting up HOOK on macOS. Written for junio
 Before you start, understand what you're building:
 
 ```
-Slack (#hook-test)
+Slack (#hook)
     ↓ messages
 OpenClaw Gateway (runs on your Mac, manages agents + Slack connection)
     ↓ routes to
@@ -55,7 +55,7 @@ You need four free API keys. Sign up before starting the install — approval ca
 ### Slack
 
 - A Slack workspace where you have permission to create apps
-- You'll create a dedicated channel (`#hook-test`) and a bot app
+- You'll create a dedicated channel (`#hook`) and a bot app
 
 ---
 
@@ -255,7 +255,7 @@ xapp-YOUR-APP-TOKEN    → your actual xapp-... app token
 
 ### 5g: Create Test Channel
 
-1. In Slack, create a channel: `#hook-test` (private recommended)
+1. In Slack, create a channel: `#hook` (private recommended)
 2. Invite the bot: type `/invite @HOOK` in the channel
 
 ---
@@ -314,11 +314,19 @@ Before testing in Slack, validate the full environment:
 ./scripts/health-check.sh
 ```
 
-This checks all dependencies, tools, config, API connectivity, and agent workspaces in one pass. Fix any ❌ failures before proceeding.
+This checks all dependencies, tools, config, API connectivity, and agent workspaces in one pass. Fix any failures before proceeding.
+
+### Validate config structure
+
+```bash
+./scripts/validate-config.sh
+```
+
+This compares your live config against the template and checks for placeholder remnants, missing agents, workspace path issues, binding configuration, and known OpenClaw schema pitfalls. Fix any [FAIL] items before proceeding.
 
 ### First test
 
-In `#hook-test`, send:
+In `#hook`, send:
 ```
 @HOOK Hello, are you online?
 ```
@@ -414,7 +422,24 @@ echo "Suspicious connection from 45.77.65.211 to evil-update.com" \
 
 Use Operation Frozen Ledger (`tests/scenarios/operation-frozen-ledger.md`) — a simulated multi-stage attack against a financial services firm.
 
-Start with the full chain test in `#hook-test`:
+### Using the test runner
+
+The test runner prints all six test prompts with expected behaviors:
+
+```bash
+# Print prompts for manual copy-paste to Slack
+./tests/run-frozen-ledger.sh
+
+# Post prompts directly to Slack (interactive, waits between tests)
+./tests/run-frozen-ledger.sh --post
+
+# After testing, create a results capture template
+./tests/run-frozen-ledger.sh --log
+```
+
+### Manual full chain test
+
+Start with the full chain test in `#hook`:
 
 ```
 @HOOK We just got this Sentinel alert. Please investigate fully — triage it, enrich all IOCs, give me IR guidance, and write a summary for management.
@@ -490,7 +515,7 @@ openclaw gateway logs --tail 50
 ```
 
 Common issues:
-- **Bot not invited to channel:** Type `/invite @HOOK` in `#hook-test`
+- **Bot not invited to channel:** Type `/invite @HOOK` in `#hook`
 - **Wrong token type:** `botToken` starts with `xoxb-`, `appToken` starts with `xapp-` — don't swap them
 - **Socket Mode not enabled:** Slack app settings → Socket Mode → must be ON
 - **Events not subscribed:** Must have `app_mention`, `message.channels`, `message.groups`, `message.im`
@@ -544,9 +569,12 @@ launchctl bootstrap gui/$UID ~/Library/LaunchAgents/ai.openclaw.gateway.plist
 | `~/.openclaw/openclaw.json` | Live config (API keys, agents, Slack tokens) | During setup, when adding features |
 | `workspaces/*/SOUL.md` | Agent personality, routing rules, capabilities | When tuning agent behavior |
 | `workspaces/*/TOOLS.md` | Tool instructions, API call templates, enrichment commands | When adding new tools or APIs |
-| `config/openclaw.json.template` | Template for fresh installs | When changing agent config structure |
+| `config/openclaw.json.template` | Template for fresh installs (uses placeholders) | When changing agent config structure |
 | `pipelines/*.yaml` | Lobster deterministic workflows | When adding automated pipelines |
 | `scripts/*.sh` | Enrichment helper scripts | When adding new enrichment sources |
+| `scripts/health-check.sh` | Environment validation (tools, APIs, workspaces) | When adding new dependencies |
+| `scripts/validate-config.sh` | Config structure validation (drift, schema, bindings) | When changing config template |
+| `tests/run-frozen-ledger.sh` | Smoke test runner (print, post to Slack, log results) | When adding test scenarios |
 | `tests/scenarios/*.md` | Test prompts and expected behaviors | When adding test cases |
 
 ---
@@ -580,7 +608,8 @@ A Dockerfile is provided at `config/Dockerfile.hook` for future Docker sandboxin
 ## What's Next
 
 After successful setup:
-1. Run all six Frozen Ledger tests individually (`tests/scenarios/operation-frozen-ledger.md`)
-2. Customize `config/USER.md.template` → copy to each workspace as `USER.md` with your org details
+1. Run all six Frozen Ledger tests: `./tests/run-frozen-ledger.sh`
+2. Customize `config/USER.md.template` -- copy to each workspace as `USER.md` with your org details
 3. Experiment with Lobster pipelines for batch IOC processing
-4. Share `#hook-test` with your SOC team for feedback
+4. Share `#hook` with your SOC team for feedback
+5. Connect to a live SIEM (Sentinel API) for real alert ingestion

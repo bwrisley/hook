@@ -2,7 +2,9 @@
 
 ## API Call Instructions
 
-Use `exec` tool with `curl` for ALL API calls. Do NOT use web_fetch — external APIs block browser requests via Cloudflare.
+**Preferred:** Use the enrichment scripts (see "Enrichment Scripts" section below). They handle validation, rate limiting, caching, and structured output automatically.
+
+**Manual:** If you need a specific API call not covered by the scripts, use `exec` tool with `curl`. Do NOT use web_fetch — external APIs block browser requests via Cloudflare.
 
 API keys are available as shell environment variables:
 - `$VT_API_KEY` — VirusTotal
@@ -260,9 +262,108 @@ The full API call scripts above use `python3` for structured extraction, which i
 
 ---
 
+## Enrichment Scripts (Preferred Method)
+
+The enrichment scripts handle validation, rate limiting, caching, and structured output. **Use these instead of raw curl calls whenever possible.**
+
+### IP Enrichment (VT + AbuseIPDB + Censys + DNS)
+```bash
+exec: $HOOK_DIR/scripts/enrich-ip.sh 45.77.65.211
+```
+
+### Domain Enrichment (VT + DNS + WHOIS)
+```bash
+exec: $HOOK_DIR/scripts/enrich-domain.sh evil-update.com
+```
+
+### Hash Enrichment (VT)
+```bash
+exec: $HOOK_DIR/scripts/enrich-hash.sh e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+```
+
+### Force Fresh Enrichment (skip cache)
+```bash
+exec: $HOOK_DIR/scripts/enrich-ip.sh --no-cache 45.77.65.211
+exec: $HOOK_DIR/scripts/enrich-domain.sh --no-cache evil-update.com
+exec: $HOOK_DIR/scripts/enrich-hash.sh --no-cache abc123def456
+```
+
+### Batch Enrichment
+```bash
+echo '{"ips":["45.77.65.211","8.8.8.8"],"domains":["evil.com"],"hashes":[]}' \
+  | $HOOK_DIR/scripts/enrich-batch.sh
+```
+
+All scripts return structured JSON with a `risk` field (HIGH/MEDIUM/LOW) and a `sources` object with per-API findings. Cached results include a `_cache` field with `hit: true`, `age_hours`, and `ttl_hours`.
+
+---
+
+## IOC Cache
+
+Enrichment results are cached locally to avoid redundant API calls and conserve rate limits. The cache is checked automatically by the enrichment scripts.
+
+### How it works
+- **Location:** `data/cache/{ip,domain,hash}/` (one JSON file per IOC)
+- **TTLs:** IPs = 24 hours, domains = 72 hours, hashes = 7 days
+- **Cache hit:** Script returns cached result immediately (no API call)
+- **Cache miss/stale:** Script performs live enrichment, caches the result
+- **Force fresh:** Use `--no-cache` flag to bypass cache
+
+### Cache Management
+```bash
+# View cache statistics
+exec: $HOOK_DIR/scripts/ioc-cache.sh stats
+
+# Look up a specific cached IOC
+exec: $HOOK_DIR/scripts/ioc-cache.sh lookup 45.77.65.211
+
+# List all cached IOCs
+exec: $HOOK_DIR/scripts/ioc-cache.sh list
+
+# List cached IPs only
+exec: $HOOK_DIR/scripts/ioc-cache.sh list ip
+
+# Clear expired entries (safe maintenance)
+exec: $HOOK_DIR/scripts/ioc-cache.sh clear --stale
+
+# Clear everything
+exec: $HOOK_DIR/scripts/ioc-cache.sh clear
+```
+
+### When to use --no-cache
+- IOC was previously LOW risk but new intel suggests it may be malicious
+- Analyst specifically requests fresh data
+- Investigating an active incident where currency matters
+- Cache entry is stale but you want immediate results rather than waiting for next enrichment
+
+### Pattern Recognition
+When you see the same IOC appearing across multiple enrichment requests, note this in your findings. Repeated IOCs across different alerts may indicate a campaign or persistent threat. Check the cache to see if an IOC has been enriched before and when.
+
+---
+
 ## Container Tools
 
 **Custom image (hook-openclaw):** `curl`, `python3`, `jq`, `dig`, `whois`, `nmap`, `ping`, `traceroute`
 **Base image (openclaw):** `curl`, `python3` only — use python3 fallbacks above
 
 All API calls must use `exec` tool, NOT `web_fetch` (Cloudflare blocks browser requests).
+
+---
+
+## Behavioral Memory (RAG)
+
+Before enriching an IOC, check if HOOK has seen it before:
+
+```bash
+exec: python3 $HOOK_DIR/scripts/rag-inject.py query "45.77.65.211" --category ioc_verdict --k 3
+```
+
+This returns past verdicts for the IOC. If a recent verdict exists with high confidence, reference it in your analysis rather than re-enriching from scratch.
+
+After completing enrichment, store the verdict for future recall:
+
+```bash
+exec: python3 $HOOK_DIR/scripts/rag-inject.py store-verdict --ioc "45.77.65.211" --type ip --verdict "HIGH risk, Cobalt Strike C2 beacon" --confidence high
+```
+
+This builds HOOK's institutional memory across investigations.

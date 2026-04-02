@@ -51,42 +51,75 @@ sessions_list()
 ```
 Check which subagents are still running or have completed.
 
-## Investigation State Files
+## Investigation Management (exec tool)
 
-For multi-step investigations, write a state file to track chain progress. This survives context compaction and gives you a persistent record.
+Use the `exec` tool to run investigation management commands. These are REAL commands you must ACTUALLY EXECUTE using the exec tool — not just describe or reference.
 
-### Write State
+### Create an Investigation
+Use the exec tool to run:
 ```
-exec: cat > investigation-state.md << 'EOF'
-# Investigation: Suspicious PowerShell on WKSTN-FIN-042
-## Status: in-progress
-## Started: 2026-03-01T14:30:00Z
-
-### Chain Progress
-- [x] Triage: TP, High confidence
-- [ ] OSINT: Pending
-- [ ] Report: Pending
-
-### Accumulated Findings
-Triage verdict: True Positive (85% confidence)
-ATT&CK: T1059.001 (PowerShell), T1071.001 (Web Protocols)
-
-### Extracted IOCs
-| IOC | Type | Risk | Source |
-|-----|------|------|--------|
-| 45.77.65.211 | IP | TBD | Triage extraction |
-
-### Next Step
-Spawn osint-researcher for IOC enrichment
-EOF
+$HOOK_DIR/scripts/investigation.sh create "Title describing the incident"
 ```
+Returns JSON with the investigation ID. Save this ID for all subsequent commands.
 
-### Read State
+### Register IOCs
+Use the exec tool to run:
 ```
-exec: cat investigation-state.md
+$HOOK_DIR/scripts/investigation.sh add-ioc <INV-ID> <type> <value> "<context>"
 ```
+Types: ip, domain, hash, url, email. Context is a brief description like "C2 callback" or "stager download".
 
-Read the state file at the start of each chain step to recover context. Update it after each subagent announces back.
+### Record Findings (MANDATORY after every subagent announce)
+Use the exec tool to run:
+```
+$HOOK_DIR/scripts/investigation.sh add-finding <INV-ID> <agent-name> "<one-line summary>"
+```
+You MUST run this after every subagent announces back. This is how findings get persisted.
+
+### Get Investigation Context (MANDATORY before every chain spawn)
+Use the exec tool to run:
+```
+$HOOK_DIR/scripts/investigation.sh context <INV-ID>
+```
+Returns formatted markdown with all IOCs, findings, and timeline. Include this output in the `task` field when spawning the next agent in a chain.
+
+### Other Commands
+Use the exec tool to run any of these:
+```
+$HOOK_DIR/scripts/investigation.sh status <INV-ID>          # Detailed status
+$HOOK_DIR/scripts/investigation.sh set-status <INV-ID> <s>  # Update status
+$HOOK_DIR/scripts/investigation.sh active                    # Current active investigation
+$HOOK_DIR/scripts/investigation.sh list                      # List all investigations
+$HOOK_DIR/scripts/investigation.sh close <INV-ID> <disp>     # Close investigation
+```
+Statuses: active, contained, eradication, recovery, monitoring, closed
+Dispositions: resolved, false-positive, escalated, inconclusive
+
+### Example: Full Chain with Investigation
+
+Step 0 — Use exec to create investigation and register IOCs:
+```
+exec: $HOOK_DIR/scripts/investigation.sh create "Multi-stage attack on WKSTN-FIN-042"
+exec: $HOOK_DIR/scripts/investigation.sh add-ioc INV-20260302-001 ip 45.77.65.211 "C2 callback"
+exec: $HOOK_DIR/scripts/investigation.sh add-ioc INV-20260302-001 domain update-check.finance-portal.com "stager"
+```
+Then spawn triage-analyst.
+
+Step 1 — When triage announces back, use exec to record finding and get context, then spawn next:
+```
+exec: $HOOK_DIR/scripts/investigation.sh add-finding INV-20260302-001 triage-analyst "TP high confidence. T1071, T1078, T1021."
+exec: $HOOK_DIR/scripts/investigation.sh context INV-20260302-001
+```
+Include the context output in the osint-researcher spawn task.
+
+Step 2 — When OSINT announces back, same pattern:
+```
+exec: $HOOK_DIR/scripts/investigation.sh add-finding INV-20260302-001 osint-researcher "3 IOCs enriched, IP low-risk Vultr."
+exec: $HOOK_DIR/scripts/investigation.sh context INV-20260302-001
+```
+Include context in the incident-responder spawn task.
+
+Repeat for every step. Every announce → exec add-finding → exec context → spawn next.
 
 ## Quick Enrichment — DO NOT SELF-HANDLE
 
@@ -164,7 +197,46 @@ This is faster and cheaper than a pure agent chain because the enrichment steps 
 
 ## Shell Environment
 
-The coordinator does NOT run API calls or enrichment queries directly. The following environment variables exist for specialist agents only:
-- `$VT_API_KEY`, `$CENSYS_API_ID`, `$CENSYS_API_SECRET`, `$ABUSEIPDB_API_KEY`
+The coordinator CAN and SHOULD use `exec` for:
+- Running investigation management scripts (`$HOOK_DIR/scripts/investigation.sh`)
+- Reading investigation context for chain handoff
+- Basic file operations
 
-The coordinator CAN use `exec` for file operations (reading/writing investigation state files) and basic utilities. Do NOT use `exec` for API calls or enrichment — spawn the right specialist or use a Lobster pipeline.
+The coordinator does NOT use `exec` for:
+- API calls or enrichment queries (spawn osint-researcher instead)
+- Report generation (spawn report-writer instead)
+- Any analysis work (spawn the right specialist)
+
+Environment variables available:
+- `$HOOK_DIR` — Path to the HOOK repository root
+- `$VT_API_KEY`, `$CENSYS_API_ID`, `$CENSYS_API_SECRET`, `$ABUSEIPDB_API_KEY` — For specialist agents only
+
+---
+
+## Behavioral Memory (RAG)
+
+After a multi-agent chain completes, store the investigation summary for future recall:
+
+```bash
+exec: python3 $HOOK_DIR/scripts/rag-inject.py store-finding --inv INV-20260302-001 --agent coordinator --summary "Multi-stage attack: phishing to C2, contained within 2 hours"
+```
+
+To check for related past investigations before starting a new chain:
+
+```bash
+exec: python3 $HOOK_DIR/scripts/rag-inject.py query "Cobalt Strike beacon" --category investigation_finding --k 3
+```
+
+### Log Querier Agent
+
+When an investigation needs raw log evidence and `HOOK_OPENSEARCH_HOST` is configured, delegate to the log-querier agent:
+
+```
+sessions_spawn(
+  task: "Query logs for outbound connections to 45.77.65.211 in the last 24 hours",
+  agentId: "log-querier",
+  runTimeoutSeconds: 120
+)
+```
+
+The log-querier translates natural language questions into OpenSearch DSL queries.

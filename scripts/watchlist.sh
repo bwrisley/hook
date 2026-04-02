@@ -109,6 +109,7 @@ case "$ACTION" in
         NOW=$(now_utc)
         TEMP="$WATCHLIST.tmp"
         : > "$TEMP"
+        ESCALATIONS=""
 
         while IFS='|' read -r ioc type added checked risk; do
             echo "  Checking: $ioc ($type)..."
@@ -122,7 +123,11 @@ case "$ACTION" in
 
             # Detect risk changes
             if [ "$risk" != "unknown" ] && [ "$risk" != "$NEW_RISK" ]; then
-                echo "  RISK CHANGE: $ioc $risk → $NEW_RISK"
+                echo "  RISK CHANGE: $ioc $risk -> $NEW_RISK"
+                # Track escalations to HIGH for auto-investigation
+                if [ "$NEW_RISK" = "HIGH" ] && [ "$risk" != "HIGH" ]; then
+                    ESCALATIONS="${ESCALATIONS}${type}:${ioc},"
+                fi
             fi
 
             echo "${ioc}|${type}|${added}|${NOW}|${NEW_RISK}" >> "$TEMP"
@@ -130,6 +135,18 @@ case "$ACTION" in
 
         mv "$TEMP" "$WATCHLIST"
         echo "Watchlist check complete. $COUNT IOCs re-enriched."
+
+        # Auto-investigate risk escalations to HIGH
+        if [ -n "$ESCALATIONS" ]; then
+            # Remove trailing comma
+            ESCALATIONS="${ESCALATIONS%,}"
+            ESC_COUNT=$(echo "$ESCALATIONS" | tr ',' '\n' | wc -l | tr -d ' ')
+            echo "  Triggering auto-investigation for $ESC_COUNT escalated IOCs..."
+            "$SCRIPT_DIR/auto-investigate.sh" \
+                --title "Watchlist escalation: $ESC_COUNT IOC(s) escalated to HIGH" \
+                --source "watchlist-check" \
+                --iocs "$ESCALATIONS" 2>/dev/null || true
+        fi
         ;;
 
     import)

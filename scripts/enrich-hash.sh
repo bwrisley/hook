@@ -1,26 +1,44 @@
 #!/bin/bash
 # enrich-hash.sh — File hash enrichment (VirusTotal)
 # Usage: ./scripts/enrich-hash.sh <SHA256|SHA1|MD5>
+#        ./scripts/enrich-hash.sh --no-cache <HASH>    (skip cache, force live)
 # Output: JSON object with VT findings
 # Requires: $VT_API_KEY
 
 set -euo pipefail
 
-HASH="${1:?Usage: enrich-hash.sh <HASH>}"
+NO_CACHE=0
+if [ "${1:-}" = "--no-cache" ]; then
+    NO_CACHE=1
+    shift
+fi
+
+HASH="${1:?Usage: enrich-hash.sh [--no-cache] <HASH>}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-python3 - "$HASH" "$SCRIPT_DIR" <<'PYEOF'
+python3 - "$HASH" "$SCRIPT_DIR" "$NO_CACHE" <<'PYEOF'
 import sys, os
 
+hash_arg = sys.argv[1]
 script_dir = sys.argv[2]
+no_cache = sys.argv[3] == '1'
+
 exec(open(os.path.join(script_dir, 'lib', 'common.py')).read())
 
 SCRIPT = 'enrich-hash'
 
 try:
-    file_hash = validate_hash(sys.argv[1])
+    file_hash = validate_hash(hash_arg)
 except ValueError as e:
-    error_exit(SCRIPT, str(e), sys.argv[1][:80])
+    error_exit(SCRIPT, str(e), hash_arg[:80])
+
+# Check cache first
+if not no_cache:
+    cached, hit = cache_get('hash', file_hash)
+    if hit:
+        log_info(SCRIPT, f'Cache hit for {file_hash[:16]}...')
+        output_json(cached)
+        sys.exit(0)
 
 log_info(SCRIPT, f'Starting enrichment for {file_hash[:16]}...')
 results = {'ioc': file_hash, 'type': 'hash', 'sources': {}}
@@ -73,6 +91,9 @@ elif vt_mal > 0:
     results['risk'] = 'MEDIUM'
 else:
     results['risk'] = 'LOW'
+
+# Cache the result
+cache_put('hash', file_hash, results)
 
 log_info(SCRIPT, f'Enrichment complete for {file_hash[:16]}...', {'risk': results['risk']})
 output_json(results)

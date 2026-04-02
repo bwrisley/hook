@@ -7,7 +7,9 @@
 #   2. Enrich new IOCs (via batch pipeline)
 #   3. Re-check watchlist items for risk changes
 #   4. Generate daily report
-#   5. Post summary to Slack
+#   4b. Auto-create investigation for HIGH risk feed IOCs
+#   4c. Auto-create investigation for watchlist risk escalations to HIGH
+#   5. Post summary to Slack (with investigation IDs if created)
 #
 # Outputs:
 #   data/reports/daily-<date>.json    Full enrichment results
@@ -189,6 +191,93 @@ EOF
 
 log "  → Report saved: $REPORT"
 
+# ─── Step 4b: Auto-investigate HIGH risk IOCs ─────────────────────
+
+INV_ID=""
+
+if [ "$FEED_HIGH" -gt 0 ] && [ -f "$REPORT_DIR/daily-feeds-$DATE.json" ]; then
+    log "Step 4b: Auto-investigating $FEED_HIGH HIGH risk IOCs..."
+
+    # Extract high-risk IOCs from enrichment results
+    HIGH_IOCS=$(python3 -c "
+import json, sys
+
+try:
+    with open('$REPORT_DIR/daily-feeds-$DATE.json') as f:
+        data = json.load(f)
+    results = data.get('results', data.get('enrichments', []))
+    if isinstance(data, dict) and 'results' not in data and 'enrichments' not in data:
+        results = [data]
+    high = []
+    for r in results if isinstance(results, list) else [results]:
+        if isinstance(r, dict) and r.get('risk') == 'HIGH':
+            high.append({'type': r.get('type', 'unknown'), 'value': r.get('ioc', '')})
+    print(json.dumps({'high_risk_iocs': high}))
+except Exception as e:
+    print(json.dumps({'high_risk_iocs': []}))
+" 2>/dev/null)
+
+    if [ -n "$HIGH_IOCS" ] && [ "$HIGH_IOCS" != '{"high_risk_iocs": []}' ]; then
+        INV_RESULT=$(echo "$HIGH_IOCS" | "$SCRIPT_DIR/auto-investigate.sh" \
+            --title "Feed alert ($DATE): $FEED_HIGH HIGH risk IOCs detected" \
+            --source "daily-check" \
+            --no-slack 2>&1)
+
+        INV_ID=$(echo "$INV_RESULT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('inv_id',''))" 2>/dev/null || echo "")
+        if [ -n "$INV_ID" ]; then
+            log "  → Investigation created: $INV_ID"
+        else
+            log "  → Auto-investigation returned no ID"
+        fi
+    else
+        log "  → No HIGH risk IOCs to extract from enrichment results"
+    fi
+else
+    log "Step 4b: Skipped (no HIGH risk feed IOCs)"
+fi
+
+# ─── Step 4c: Auto-investigate watchlist risk escalations ─────────
+
+if [ -n "$WATCHLIST_CHANGES" ]; then
+    log "Step 4c: Investigating watchlist risk escalations..."
+
+    # Parse risk change lines into IOCs
+    ESCALATED_IOCS=$(echo "$WATCHLIST_CHANGES" | python3 -c "
+import sys, json, re
+iocs = []
+for line in sys.stdin:
+    # Format: 'RISK CHANGE: <ioc> <old> -> <new>'
+    m = re.match(r'.*RISK CHANGE:\s+(\S+)\s+\S+\s+.*\s+(\S+)', line.strip())
+    if m and m.group(2) == 'HIGH':
+        ioc = m.group(1)
+        # Detect type
+        if re.match(r'^\d+\.\d+\.\d+\.\d+$', ioc):
+            iocs.append({'type': 'ip', 'value': ioc})
+        elif re.match(r'^[a-fA-F0-9]{32,64}$', ioc):
+            iocs.append({'type': 'hash', 'value': ioc})
+        else:
+            iocs.append({'type': 'domain', 'value': ioc})
+print(json.dumps({'high_risk_iocs': iocs}))
+" 2>/dev/null)
+
+    if [ -n "$ESCALATED_IOCS" ] && [ "$ESCALATED_IOCS" != '{"high_risk_iocs": []}' ]; then
+        ESC_COUNT=$(echo "$ESCALATED_IOCS" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('high_risk_iocs',[])))" 2>/dev/null || echo 0)
+        if [ "$ESC_COUNT" -gt 0 ]; then
+            WL_INV_RESULT=$(echo "$ESCALATED_IOCS" | "$SCRIPT_DIR/auto-investigate.sh" \
+                --title "Watchlist escalation ($DATE): $ESC_COUNT IOCs changed to HIGH" \
+                --source "watchlist-check" \
+                --no-slack 2>&1)
+
+            WL_INV_ID=$(echo "$WL_INV_RESULT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('inv_id',''))" 2>/dev/null || echo "")
+            if [ -n "$WL_INV_ID" ]; then
+                log "  → Watchlist investigation created: $WL_INV_ID"
+            fi
+        fi
+    fi
+else
+    log "Step 4c: Skipped (no watchlist risk escalations)"
+fi
+
 # ─── Step 5: Post to Slack ──────────────────────────────────────────
 
 if [ "$NO_SLACK" = false ]; then
@@ -200,6 +289,9 @@ if [ "$NO_SLACK" = false ]; then
 
     if [ "$FEED_HIGH" -gt 0 ]; then
         SLACK_MSG+="\n*ALERT: $FEED_HIGH HIGH risk IOC(s) identified in feeds*"
+        if [ -n "$INV_ID" ]; then
+            SLACK_MSG+="\nInvestigation opened: \`$INV_ID\`"
+        fi
     else
         SLACK_MSG+="\nNo high-risk IOCs in today's feeds"
     fi
@@ -222,6 +314,9 @@ log "═════════════════════════
 log "Daily check complete."
 log "  Feed IOCs: $FEED_IOCS fetched, $FEED_ENRICHED enriched, $FEED_HIGH high risk"
 log "  Watchlist: $WATCHLIST_COUNT tracked"
+if [ -n "$INV_ID" ]; then
+    log "  Investigation: $INV_ID (feed alert)"
+fi
 log "  Report: $REPORT"
 log "═══════════════════════════════════════════════════"
 

@@ -1,0 +1,267 @@
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Plus, Send } from 'lucide-react'
+import { api, streamChat, AGENT_LABELS } from '../lib/api.js'
+import AgentBadge from '../components/AgentBadge.jsx'
+
+export default function InvestigatePage() {
+  const { conversationId } = useParams()
+  const navigate = useNavigate()
+  const [conversations, setConversations] = useState([])
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [activeAgent, setActiveAgent] = useState(null)
+  const activeId = conversationId || null
+  const messagesEndRef = useRef(null)
+  const isStreamingRef = useRef(false)
+  const sessionKeyRef = useRef(null)
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  useEffect(() => { scrollToBottom() }, [messages])
+
+  const loadConversations = async () => {
+    try {
+      const res = await api.get('/api/conversations')
+      setConversations(res.data.items || [])
+    } catch { /* gateway may be offline */ }
+  }
+
+  useEffect(() => { loadConversations() }, [])
+
+  const newChat = () => {
+    setMessages([])
+    setActiveAgent(null)
+    sessionKeyRef.current = null
+    navigate('/investigate')
+  }
+
+  const send = async () => {
+    if (!input.trim() || busy) return
+    const outgoing = input.trim()
+    const ts = new Date().toISOString()
+
+    const userMsg = { id: `${ts}-user`, role: 'user', content: outgoing, timestamp: ts }
+    setMessages((prev) => [...prev, userMsg])
+    setBusy(true)
+    setActiveAgent('coordinator')
+    setInput('')
+    isStreamingRef.current = true
+
+    try {
+      await streamChat({
+        message: outgoing,
+        conversationId: activeId,
+        sessionKey: sessionKeyRef.current,
+        onEvent: (event, payload) => {
+          if (event === 'meta') {
+            if (payload.conversation_id && !activeId) {
+              navigate(`/investigate/${payload.conversation_id}`, { replace: true })
+            }
+            if (payload.session_key) {
+              sessionKeyRef.current = payload.session_key
+            }
+          }
+
+          if (event === 'agent_start') {
+            setActiveAgent(payload.agent)
+            setMessages((prev) => [...prev, {
+              id: `${Date.now()}-start-${payload.agent}`,
+              role: 'system',
+              agent: payload.agent,
+              content: `Delegating to ${AGENT_LABELS[payload.agent] || payload.agent}...`,
+              timestamp: new Date().toISOString(),
+              type: 'agent_start',
+            }])
+          }
+
+          if (event === 'agent_result') {
+            setActiveAgent('coordinator')
+            setMessages((prev) => [...prev, {
+              id: `${Date.now()}-result-${payload.agent}`,
+              role: 'assistant',
+              agent: payload.agent,
+              content: payload.content,
+              timestamp: new Date().toISOString(),
+              type: 'agent_result',
+            }])
+          }
+
+          if (event === 'coordinator') {
+            setMessages((prev) => [...prev, {
+              id: `${Date.now()}-coord`,
+              role: 'assistant',
+              agent: 'coordinator',
+              content: payload.content,
+              timestamp: new Date().toISOString(),
+              type: 'coordinator',
+            }])
+          }
+
+          if (event === 'response') {
+            if (payload.response) {
+              setMessages((prev) => [...prev, {
+                id: `${Date.now()}-response`,
+                role: 'assistant',
+                agent: 'coordinator',
+                content: payload.response,
+                timestamp: new Date().toISOString(),
+                type: 'response',
+              }])
+            }
+          }
+
+          if (event === 'error') {
+            setMessages((prev) => [...prev, {
+              id: `${Date.now()}-error`,
+              role: 'system',
+              content: `Error: ${payload.message}`,
+              timestamp: new Date().toISOString(),
+              type: 'error',
+            }])
+          }
+        },
+      })
+    } catch (err) {
+      setMessages((prev) => [...prev, {
+        id: `${Date.now()}-err`,
+        role: 'system',
+        content: `Connection error: ${err.message}`,
+        timestamp: new Date().toISOString(),
+        type: 'error',
+      }])
+    } finally {
+      isStreamingRef.current = false
+      setBusy(false)
+      setActiveAgent(null)
+      loadConversations()
+    }
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      send()
+    }
+  }
+
+  const getBorderClass = (msg) => {
+    if (msg.type === 'error') return 'border-danger/30 bg-danger/5'
+    if (msg.type === 'agent_start') return 'border-amber/20 bg-amber/5'
+    if (msg.role === 'user') return 'border-border bg-panel2'
+    return 'border-accent/20 bg-accent/5'
+  }
+
+  return (
+    <div className="flex h-full min-h-0 gap-6">
+      {/* Conversation sidebar */}
+      <div className="panel flex w-72 flex-col overflow-hidden">
+        <div className="border-b border-border p-4">
+          <button className="btn btn-primary w-full" onClick={newChat}>
+            <Plus className="h-4 w-4" /> New Investigation
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto p-3 space-y-2">
+          {conversations.map((conv) => (
+            <button
+              key={conv.conversation_id}
+              className={`w-full rounded-xl border p-3 text-left transition ${
+                activeId === conv.conversation_id
+                  ? 'border-accent bg-accent/10'
+                  : 'border-border bg-panel2 hover:border-border hover:bg-panel2'
+              }`}
+              onClick={() => navigate(`/investigate/${conv.conversation_id}`)}
+            >
+              <div className="truncate font-mono text-xs uppercase tracking-[0.14em] text-accent">
+                {conv.conversation_id}
+              </div>
+              <div className="mt-2 font-mono text-[11px] text-dim">
+                {conv.last_message_at ? new Date(conv.last_message_at).toLocaleString() : ''}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Main chat area */}
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <h1 className="font-mono text-sm font-bold uppercase tracking-[0.18em] text-accent">Investigate</h1>
+          {activeAgent && busy && (
+            <div className="flex items-center gap-2">
+              <AgentBadge agentId={activeAgent} />
+              <span className="inline-flex items-center gap-1 font-mono text-xs text-accent">
+                working
+                <span className="activity-ellipsis" aria-hidden="true">
+                  <span /><span /><span />
+                </span>
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="panel flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="min-h-0 flex-1 space-y-3 overflow-auto p-5">
+            {messages.length === 0 && (
+              <div className="flex h-full items-center justify-center">
+                <div className="text-center">
+                  <div className="font-mono text-sm uppercase tracking-[0.18em] text-dim">
+                    Submit an alert, IOC, or question
+                  </div>
+                  <div className="mt-2 font-mono text-xs text-dim">
+                    Shadowbox will route to the appropriate specialist
+                  </div>
+                </div>
+              </div>
+            )}
+            {messages.map((msg) => (
+              <div key={msg.id} className={`rounded-xl border p-4 ${getBorderClass(msg)}`}>
+                <div className="mb-2 flex items-center gap-2">
+                  {msg.agent ? (
+                    <AgentBadge agentId={msg.agent} />
+                  ) : (
+                    <span className="font-mono text-xs uppercase tracking-[0.18em] text-dim">
+                      {msg.role === 'user' ? 'Operator' : 'System'}
+                    </span>
+                  )}
+                  <span className="font-mono text-[10px] text-dim">
+                    {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
+                  </span>
+                </div>
+                <div className="markdown text-sm">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                </div>
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div className="border-t border-border p-4">
+            <div className="flex gap-2">
+              <textarea
+                className="textarea min-h-16 flex-1"
+                placeholder="Describe an alert, paste IOCs, or ask a security question... Enter to send, Shift+Enter for newline"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={2}
+              />
+              <button
+                className="btn btn-primary self-end"
+                onClick={send}
+                disabled={busy || !input.trim()}
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -10,7 +10,8 @@
     "ABUSEIPDB_API_KEY": "YOUR_ABUSEIPDB_API_KEY",
     "shellEnv": {
       "enabled": true
-    }
+    },
+    "HOOK_DIR": "HOOK_REPO_PATH"
   },
   "tools": {
     "profile": "full",
@@ -48,7 +49,8 @@
             "osint-researcher",
             "incident-responder",
             "threat-intel",
-            "report-writer"
+            "report-writer",
+            "log-querier"
           ]
         }
       },
@@ -86,6 +88,13 @@
         "model": {
           "primary": "openai/gpt-4.1"
         }
+      },
+      {
+        "id": "log-querier",
+        "workspace": "HOOK_REPO_PATH/workspaces/log-querier",
+        "model": {
+          "primary": "openai/gpt-4.1"
+        }
       }
     ]
   },
@@ -118,7 +127,7 @@
       "appToken": "xapp-YOUR-APP-TOKEN",
       "nativeStreaming": false,
       "channels": {
-        "#hook-test": {
+        "HOOK_CHANNEL_NAME": {
           "allow": true
         }
       }

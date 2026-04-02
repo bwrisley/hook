@@ -162,7 +162,7 @@ Some community members use shared filesystem + polling (agent reads another agen
 ## Recommended HOOK Architecture
 
 ```
-User (Slack #hook-test)
+User (Slack #hook)
     │
     ▼
 OpenClaw Gateway (:18789)
@@ -179,11 +179,11 @@ Coordinator Agent (default, receives all messages)
     └── sessions_spawn(agentId: "report-writer", task: "Write executive summary...")
          │
          ▼
-    Results announced back to #hook-test
+    Results announced back to #hook
 ```
 
 ### Flow
-1. User posts alert/question to `#hook-test`
+1. User posts alert/question to `#hook`
 2. Coordinator receives it (default agent via binding)
 3. Coordinator's SOUL.md has routing logic: decides which specialist(s) to invoke
 4. Coordinator calls `sessions_spawn` with task description and target `agentId`

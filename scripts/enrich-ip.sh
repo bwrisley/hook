@@ -1,28 +1,45 @@
 #!/bin/bash
 # enrich-ip.sh — Multi-source IP enrichment (VT + AbuseIPDB + Censys + DNS)
 # Usage: ./scripts/enrich-ip.sh <IP>
+#        ./scripts/enrich-ip.sh --no-cache <IP>    (skip cache, force live)
 # Output: JSON object with combined findings
 # Requires: $VT_API_KEY, $ABUSEIPDB_API_KEY, $CENSYS_API_ID, $CENSYS_API_SECRET
 
 set -euo pipefail
 
-IP="${1:?Usage: enrich-ip.sh <IP>}"
+NO_CACHE=0
+if [ "${1:-}" = "--no-cache" ]; then
+    NO_CACHE=1
+    shift
+fi
+
+IP="${1:?Usage: enrich-ip.sh [--no-cache] <IP>}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-python3 - "$IP" "$SCRIPT_DIR" <<'PYEOF'
+python3 - "$IP" "$SCRIPT_DIR" "$NO_CACHE" <<'PYEOF'
 import sys, os
 
-# Load shared library
+ip_arg = sys.argv[1]
 script_dir = sys.argv[2]
+no_cache = sys.argv[3] == '1'
+
 exec(open(os.path.join(script_dir, 'lib', 'common.py')).read())
 
 SCRIPT = 'enrich-ip'
 
-# Validate input (prevents shell injection + catches garbage)
+# Validate input
 try:
-    ip = validate_ip(sys.argv[1])
+    ip = validate_ip(ip_arg)
 except ValueError as e:
-    error_exit(SCRIPT, str(e), sys.argv[1][:80])
+    error_exit(SCRIPT, str(e), ip_arg[:80])
+
+# Check cache first
+if not no_cache:
+    cached, hit = cache_get('ip', ip)
+    if hit:
+        log_info(SCRIPT, f'Cache hit for {ip}')
+        output_json(cached)
+        sys.exit(0)
 
 log_info(SCRIPT, f'Starting enrichment for {ip}')
 results = {'ioc': ip, 'type': 'ip', 'sources': {}}
@@ -116,6 +133,9 @@ elif vt_mal > 0 or abuse_score > 25:
     results['risk'] = 'MEDIUM'
 else:
     results['risk'] = 'LOW'
+
+# Cache the result
+cache_put('ip', ip, results)
 
 log_info(SCRIPT, f'Enrichment complete for {ip}', {'risk': results['risk']})
 output_json(results)
