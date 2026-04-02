@@ -266,11 +266,28 @@ def create_app() -> FastAPI:
         # Persist the user message
         web_db.add_message(conversation_id, "user", body.message)
 
+        # Build conversation context for multi-turn
+        prior_messages = web_db.get_messages(conversation_id)
+        context_lines = []
+        # Include up to last 10 messages as context (skip the current one we just added)
+        for msg in prior_messages[:-1][-10:]:
+            role_label = "Operator" if msg["role"] == "user" else (msg.get("agent") or "System")
+            context_lines.append(f"[{role_label}]: {msg['content'][:500]}")
+        conversation_context = "\n".join(context_lines)
+
+        # Build the message with context if there's prior conversation
+        message_with_context = body.message
+        if conversation_context:
+            message_with_context = f"""Previous conversation:
+{conversation_context}
+
+Current request: {body.message}"""
+
         async def event_stream():
             yield sse_event("meta", {"conversation_id": conversation_id})
 
             new_session_key = None
-            async for raw_event in bridge.send_message(body.message, session_key=session_key):
+            async for raw_event in bridge.send_message(message_with_context, session_key=session_key):
                 yield raw_event
 
                 # Parse the SSE event to extract type and data

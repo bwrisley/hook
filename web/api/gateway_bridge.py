@@ -149,7 +149,15 @@ class GatewayBridge:
                 "content": f"Running {delegated_to}...",
             })
 
-            specialist_result = await self._run_agent(delegated_to, message)
+            # Build a context-enriched message for the specialist
+            # Include the coordinator's routing context so the specialist has full findings
+            specialist_message = f"""Context from coordinator (Marshall):
+{response_text}
+
+Original operator request: {message}
+
+Complete the task described above. Use the context provided by the coordinator."""
+            specialist_result = await self._run_agent(delegated_to, specialist_message)
 
             if specialist_result:
                 yield sse_event("agent_result", {
