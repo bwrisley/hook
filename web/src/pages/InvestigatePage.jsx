@@ -75,6 +75,9 @@ export default function InvestigatePage() {
 
   const deleteConversation = async (convId, e) => {
     e.stopPropagation()
+    const conv = conversations.find((c) => c.conversation_id === convId)
+    const label = conv?.title || convId
+    if (!window.confirm(`Delete investigation "${label}"? This cannot be undone.`)) return
     try {
       await api.delete(`/api/conversations/${convId}`)
       if (activeId === convId) {
