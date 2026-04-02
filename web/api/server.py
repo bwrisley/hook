@@ -88,7 +88,7 @@ def _mask_secrets(config: dict) -> dict:
 # -- Web session DB --
 
 class WebSessionDB:
-    """Lightweight SQLite store mapping web conversations to OpenClaw sessions."""
+    """SQLite store for web conversations and message history."""
 
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
@@ -100,7 +100,20 @@ class WebSessionDB:
                 session_key TEXT,
                 investigation_id TEXT,
                 created_at TEXT,
-                last_message_at TEXT
+                last_message_at TEXT,
+                title TEXT
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                agent TEXT,
+                content TEXT NOT NULL,
+                msg_type TEXT,
+                timestamp TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id)
             )
         """)
         self._conn.commit()
@@ -109,7 +122,7 @@ class WebSessionDB:
         """Get existing conversation or create a new one."""
         if conversation_id:
             row = self._conn.execute(
-                "SELECT * FROM conversations WHERE conversation_id = ?",
+                "SELECT conversation_id, session_key, investigation_id FROM conversations WHERE conversation_id = ?",
                 (conversation_id,),
             ).fetchone()
             if row:
@@ -122,14 +135,13 @@ class WebSessionDB:
         conv_id = conversation_id or str(uuid.uuid4())[:8]
         now = datetime.now(timezone.utc).isoformat()
         self._conn.execute(
-            "INSERT OR IGNORE INTO conversations VALUES (?, ?, ?, ?, ?)",
-            (conv_id, None, None, now, now),
+            "INSERT OR IGNORE INTO conversations (conversation_id, session_key, investigation_id, created_at, last_message_at, title) VALUES (?, ?, ?, ?, ?, ?)",
+            (conv_id, None, None, now, now, None),
         )
         self._conn.commit()
         return {"conversation_id": conv_id, "session_key": None, "investigation_id": None}
 
     def update_session_key(self, conversation_id: str, session_key: str) -> None:
-        """Link a web conversation to an OpenClaw session."""
         now = datetime.now(timezone.utc).isoformat()
         self._conn.execute(
             "UPDATE conversations SET session_key = ?, last_message_at = ? WHERE conversation_id = ?",
@@ -137,10 +149,46 @@ class WebSessionDB:
         )
         self._conn.commit()
 
+    def add_message(self, conversation_id: str, role: str, content: str, agent: str | None = None, msg_type: str | None = None) -> None:
+        """Store a message in the conversation history."""
+        now = datetime.now(timezone.utc).isoformat()
+        self._conn.execute(
+            "INSERT INTO messages (conversation_id, role, agent, content, msg_type, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+            (conversation_id, role, agent, content, msg_type, now),
+        )
+        # Update conversation timestamp and title (first user message becomes title)
+        self._conn.execute(
+            "UPDATE conversations SET last_message_at = ? WHERE conversation_id = ?",
+            (now, conversation_id),
+        )
+        if role == "user":
+            self._conn.execute(
+                "UPDATE conversations SET title = ? WHERE conversation_id = ? AND title IS NULL",
+                (content[:100], conversation_id),
+            )
+        self._conn.commit()
+
+    def get_messages(self, conversation_id: str) -> list[dict]:
+        """Get all messages for a conversation."""
+        rows = self._conn.execute(
+            "SELECT role, agent, content, msg_type, timestamp FROM messages WHERE conversation_id = ? ORDER BY id",
+            (conversation_id,),
+        ).fetchall()
+        return [
+            {
+                "role": r[0],
+                "agent": r[1],
+                "content": r[2],
+                "type": r[3],
+                "timestamp": r[4],
+            }
+            for r in rows
+        ]
+
     def list_conversations(self) -> list[dict]:
         """List all conversations ordered by most recent."""
         rows = self._conn.execute(
-            "SELECT conversation_id, session_key, investigation_id, created_at, last_message_at "
+            "SELECT conversation_id, session_key, investigation_id, created_at, last_message_at, title "
             "FROM conversations ORDER BY last_message_at DESC"
         ).fetchall()
         return [
@@ -150,6 +198,7 @@ class WebSessionDB:
                 "investigation_id": r[2],
                 "created_at": r[3],
                 "last_message_at": r[4],
+                "title": r[5],
             }
             for r in rows
         ]
@@ -175,12 +224,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="HOOK Web API", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://localhost:7799",
-            "http://127.0.0.1:7799",
-        ],
+        allow_origins=["*"],
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["content-type"],
         allow_credentials=False,
@@ -219,23 +263,50 @@ def create_app() -> FastAPI:
         conversation_id = conv["conversation_id"]
         session_key = body.session_key or conv["session_key"]
 
+        # Persist the user message
+        web_db.add_message(conversation_id, "user", body.message)
+
         async def event_stream():
             yield sse_event("meta", {"conversation_id": conversation_id})
 
             new_session_key = None
-            async for event in bridge.send_message(body.message, session_key=session_key):
-                yield event
-                # Capture session key from meta event if new session was created
-                if '"session_key"' in event and new_session_key is None:
-                    try:
-                        data = json.loads(event.split("data: ", 1)[1].split("\n")[0])
-                        if "session_key" in data:
-                            new_session_key = data["session_key"]
-                            web_db.update_session_key(conversation_id, new_session_key)
-                    except (json.JSONDecodeError, IndexError):
-                        pass
+            async for raw_event in bridge.send_message(body.message, session_key=session_key):
+                yield raw_event
+
+                # Parse the SSE event to extract type and data
+                event_type = None
+                event_data = None
+                for line in raw_event.strip().split("\n"):
+                    if line.startswith("event: "):
+                        event_type = line[7:]
+                    elif line.startswith("data: "):
+                        try:
+                            event_data = json.loads(line[6:])
+                        except json.JSONDecodeError:
+                            pass
+
+                if not event_type or not event_data:
+                    continue
+
+                # Capture session key
+                if event_type == "meta" and "session_key" in event_data and new_session_key is None:
+                    new_session_key = event_data["session_key"]
+                    web_db.update_session_key(conversation_id, new_session_key)
+
+                # Persist agent responses
+                if event_type in ("agent_result", "coordinator"):
+                    content = event_data.get("content", "")
+                    agent = event_data.get("agent", "coordinator")
+                    if content:
+                        web_db.add_message(conversation_id, "assistant", content, agent=agent, msg_type=event_type)
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    @app.get("/api/conversations/{conversation_id}/messages")
+    async def conversation_messages(conversation_id: str) -> dict[str, Any]:
+        _validate_id(conversation_id, "conversation ID")
+        web_db: WebSessionDB = app.state.web_db
+        return {"messages": web_db.get_messages(conversation_id)}
 
     @app.get("/api/investigations")
     async def investigations() -> dict[str, Any]:
@@ -364,10 +435,23 @@ def create_app() -> FastAPI:
         web_db: WebSessionDB = app.state.web_db
         return {"items": web_db.list_conversations()}
 
-    # -- Static file serving (production) --
+    # -- Static file serving (production SPA) --
 
     if DIST_DIR.exists():
-        app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="web")
+        from fastapi.responses import FileResponse
+
+        # Serve static assets (JS, CSS, etc.)
+        app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
+
+        # Catch-all: serve index.html for all non-API routes (SPA client-side routing)
+        @app.get("/{path:path}")
+        async def spa_catch_all(path: str):
+            # If it's a real file in dist, serve it
+            file_path = DIST_DIR / path
+            if path and file_path.exists() and file_path.is_file():
+                return FileResponse(str(file_path))
+            # Otherwise serve index.html for client-side routing
+            return FileResponse(str(DIST_DIR / "index.html"))
     else:
         @app.get("/")
         async def root() -> dict[str, str]:

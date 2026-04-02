@@ -16,6 +16,7 @@ export default function InvestigatePage() {
   const [activeAgent, setActiveAgent] = useState(null)
   const activeId = conversationId || null
   const messagesEndRef = useRef(null)
+  const inputRef = useRef(null)
   const isStreamingRef = useRef(false)
   const sessionKeyRef = useRef(null)
 
@@ -25,20 +26,52 @@ export default function InvestigatePage() {
 
   useEffect(() => { scrollToBottom() }, [messages])
 
-  const loadConversations = async () => {
+  const loadConversations = async (autoSelect = false) => {
     try {
       const res = await api.get('/api/conversations')
-      setConversations(res.data.items || [])
+      const items = res.data.items || []
+      setConversations(items)
+      // Auto-select most recent conversation if none is active
+      if (autoSelect && !activeId && items.length > 0) {
+        navigate(`/investigate/${items[0].conversation_id}`, { replace: true })
+      }
     } catch { /* gateway may be offline */ }
   }
 
-  useEffect(() => { loadConversations() }, [])
+  const loadMessages = async (convId) => {
+    if (!convId) {
+      setMessages([])
+      return
+    }
+    try {
+      const res = await api.get(`/api/conversations/${convId}/messages`)
+      const loaded = (res.data.messages || []).map((msg, idx) => ({
+        ...msg,
+        id: `${msg.timestamp}-${idx}`,
+      }))
+      setMessages(loaded)
+    } catch {
+      setMessages([])
+    }
+  }
+
+  useEffect(() => { loadConversations(true) }, [])
+
+  useEffect(() => {
+    if (!isStreamingRef.current) {
+      loadMessages(activeId)
+    }
+  }, [activeId])
 
   const newChat = () => {
     setMessages([])
+    setInput('')
     setActiveAgent(null)
     sessionKeyRef.current = null
-    navigate('/investigate')
+    if (activeId) {
+      navigate('/investigate')
+    }
+    setTimeout(() => inputRef.current?.focus(), 50)
   }
 
   const send = async () => {
@@ -74,14 +107,14 @@ export default function InvestigatePage() {
               id: `${Date.now()}-start-${payload.agent}`,
               role: 'system',
               agent: payload.agent,
-              content: `Delegating to ${AGENT_LABELS[payload.agent] || payload.agent}...`,
+              content: `${AGENT_LABELS[payload.agent] || payload.agent} is working...`,
               timestamp: new Date().toISOString(),
               type: 'agent_start',
             }])
           }
 
           if (event === 'agent_result') {
-            setActiveAgent('coordinator')
+            setActiveAgent(null)
             setMessages((prev) => [...prev, {
               id: `${Date.now()}-result-${payload.agent}`,
               role: 'assistant',
@@ -101,19 +134,6 @@ export default function InvestigatePage() {
               timestamp: new Date().toISOString(),
               type: 'coordinator',
             }])
-          }
-
-          if (event === 'response') {
-            if (payload.response) {
-              setMessages((prev) => [...prev, {
-                id: `${Date.now()}-response`,
-                role: 'assistant',
-                agent: 'coordinator',
-                content: payload.response,
-                timestamp: new Date().toISOString(),
-                type: 'response',
-              }])
-            }
           }
 
           if (event === 'error') {
@@ -177,10 +197,13 @@ export default function InvestigatePage() {
               }`}
               onClick={() => navigate(`/investigate/${conv.conversation_id}`)}
             >
-              <div className="truncate font-mono text-xs uppercase tracking-[0.14em] text-accent">
+              <div className="truncate font-mono text-xs text-accent">
+                {conv.title || conv.conversation_id}
+              </div>
+              <div className="mt-1 font-mono text-[10px] text-dim">
                 {conv.conversation_id}
               </div>
-              <div className="mt-2 font-mono text-[11px] text-dim">
+              <div className="mt-1 font-mono text-[10px] text-dim">
                 {conv.last_message_at ? new Date(conv.last_message_at).toLocaleString() : ''}
               </div>
             </button>
@@ -244,6 +267,7 @@ export default function InvestigatePage() {
           <div className="border-t border-border p-4">
             <div className="flex gap-2">
               <textarea
+                ref={inputRef}
                 className="textarea min-h-16 flex-1"
                 placeholder="Describe an alert, paste IOCs, or ask a security question... Enter to send, Shift+Enter for newline"
                 value={input}

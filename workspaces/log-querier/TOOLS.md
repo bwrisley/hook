@@ -6,22 +6,22 @@ Use the query-logs.py script for all log queries. It handles field discovery, qu
 
 ### Natural Language Query
 ```bash
-exec: python3 $HOOK_DIR/scripts/query-logs.py "Show me all denied connections to port 3389 in the last 24 hours"
+exec: python3 /Users/bww/projects/hook/scripts/query-logs.py "Show me all denied connections to port 3389 in the last 24 hours"
 ```
 
 ### Specify Index
 ```bash
-exec: python3 $HOOK_DIR/scripts/query-logs.py "DNS queries to suspicious domains" --index "dns-*"
+exec: python3 /Users/bww/projects/hook/scripts/query-logs.py "DNS queries to suspicious domains" --index "dns-*"
 ```
 
 ### Field Discovery
 ```bash
-exec: python3 $HOOK_DIR/scripts/query-logs.py --fields "logs-*"
+exec: python3 /Users/bww/projects/hook/scripts/query-logs.py --fields "logs-*"
 ```
 
 ### Custom Time Range
 ```bash
-exec: python3 $HOOK_DIR/scripts/query-logs.py "All traffic from 10.0.1.50" --hours 48
+exec: python3 /Users/bww/projects/hook/scripts/query-logs.py "All traffic from 10.0.1.50" --hours 48
 ```
 
 ## Output Format

@@ -165,13 +165,13 @@ All API calls must use `exec` tool, NOT `web_fetch`.
 Before performing ACH analysis, check for historical TTP observations:
 
 ```bash
-exec: python3 $HOOK_DIR/scripts/rag-inject.py query "T1059.001 PowerShell" --category ttp_history --k 3
+exec: python3 /Users/bww/projects/hook/scripts/rag-inject.py query "T1059.001 PowerShell" --category ttp_history --k 3
 ```
 
 After completing attribution analysis, store notable TTPs for future recall:
 
 ```bash
-exec: python3 $HOOK_DIR/scripts/rag-inject.py store-ttp --technique T1059.001 --description "PowerShell beacon loader" --actor "APT29"
+exec: python3 /Users/bww/projects/hook/scripts/rag-inject.py store-ttp --technique T1059.001 --description "PowerShell beacon loader" --actor "APT29"
 ```
 
 This builds HOOK's historical TTP database across investigations.

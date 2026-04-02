@@ -58,39 +58,39 @@ Use the `exec` tool to run investigation management commands. These are REAL com
 ### Create an Investigation
 Use the exec tool to run:
 ```
-$HOOK_DIR/scripts/investigation.sh create "Title describing the incident"
+/Users/bww/projects/hook/scripts/investigation.sh create "Title describing the incident"
 ```
 Returns JSON with the investigation ID. Save this ID for all subsequent commands.
 
 ### Register IOCs
 Use the exec tool to run:
 ```
-$HOOK_DIR/scripts/investigation.sh add-ioc <INV-ID> <type> <value> "<context>"
+/Users/bww/projects/hook/scripts/investigation.sh add-ioc <INV-ID> <type> <value> "<context>"
 ```
 Types: ip, domain, hash, url, email. Context is a brief description like "C2 callback" or "stager download".
 
 ### Record Findings (MANDATORY after every subagent announce)
 Use the exec tool to run:
 ```
-$HOOK_DIR/scripts/investigation.sh add-finding <INV-ID> <agent-name> "<one-line summary>"
+/Users/bww/projects/hook/scripts/investigation.sh add-finding <INV-ID> <agent-name> "<one-line summary>"
 ```
 You MUST run this after every subagent announces back. This is how findings get persisted.
 
 ### Get Investigation Context (MANDATORY before every chain spawn)
 Use the exec tool to run:
 ```
-$HOOK_DIR/scripts/investigation.sh context <INV-ID>
+/Users/bww/projects/hook/scripts/investigation.sh context <INV-ID>
 ```
 Returns formatted markdown with all IOCs, findings, and timeline. Include this output in the `task` field when spawning the next agent in a chain.
 
 ### Other Commands
 Use the exec tool to run any of these:
 ```
-$HOOK_DIR/scripts/investigation.sh status <INV-ID>          # Detailed status
-$HOOK_DIR/scripts/investigation.sh set-status <INV-ID> <s>  # Update status
-$HOOK_DIR/scripts/investigation.sh active                    # Current active investigation
-$HOOK_DIR/scripts/investigation.sh list                      # List all investigations
-$HOOK_DIR/scripts/investigation.sh close <INV-ID> <disp>     # Close investigation
+/Users/bww/projects/hook/scripts/investigation.sh status <INV-ID>          # Detailed status
+/Users/bww/projects/hook/scripts/investigation.sh set-status <INV-ID> <s>  # Update status
+/Users/bww/projects/hook/scripts/investigation.sh active                    # Current active investigation
+/Users/bww/projects/hook/scripts/investigation.sh list                      # List all investigations
+/Users/bww/projects/hook/scripts/investigation.sh close <INV-ID> <disp>     # Close investigation
 ```
 Statuses: active, contained, eradication, recovery, monitoring, closed
 Dispositions: resolved, false-positive, escalated, inconclusive
@@ -99,23 +99,23 @@ Dispositions: resolved, false-positive, escalated, inconclusive
 
 Step 0 — Use exec to create investigation and register IOCs:
 ```
-exec: $HOOK_DIR/scripts/investigation.sh create "Multi-stage attack on WKSTN-FIN-042"
-exec: $HOOK_DIR/scripts/investigation.sh add-ioc INV-20260302-001 ip 45.77.65.211 "C2 callback"
-exec: $HOOK_DIR/scripts/investigation.sh add-ioc INV-20260302-001 domain update-check.finance-portal.com "stager"
+exec: /Users/bww/projects/hook/scripts/investigation.sh create "Multi-stage attack on WKSTN-FIN-042"
+exec: /Users/bww/projects/hook/scripts/investigation.sh add-ioc INV-20260302-001 ip 45.77.65.211 "C2 callback"
+exec: /Users/bww/projects/hook/scripts/investigation.sh add-ioc INV-20260302-001 domain update-check.finance-portal.com "stager"
 ```
 Then spawn triage-analyst.
 
 Step 1 — When triage announces back, use exec to record finding and get context, then spawn next:
 ```
-exec: $HOOK_DIR/scripts/investigation.sh add-finding INV-20260302-001 triage-analyst "TP high confidence. T1071, T1078, T1021."
-exec: $HOOK_DIR/scripts/investigation.sh context INV-20260302-001
+exec: /Users/bww/projects/hook/scripts/investigation.sh add-finding INV-20260302-001 triage-analyst "TP high confidence. T1071, T1078, T1021."
+exec: /Users/bww/projects/hook/scripts/investigation.sh context INV-20260302-001
 ```
 Include the context output in the osint-researcher spawn task.
 
 Step 2 — When OSINT announces back, same pattern:
 ```
-exec: $HOOK_DIR/scripts/investigation.sh add-finding INV-20260302-001 osint-researcher "3 IOCs enriched, IP low-risk Vultr."
-exec: $HOOK_DIR/scripts/investigation.sh context INV-20260302-001
+exec: /Users/bww/projects/hook/scripts/investigation.sh add-finding INV-20260302-001 osint-researcher "3 IOCs enriched, IP low-risk Vultr."
+exec: /Users/bww/projects/hook/scripts/investigation.sh context INV-20260302-001
 ```
 Include context in the incident-responder spawn task.
 
@@ -198,7 +198,7 @@ This is faster and cheaper than a pure agent chain because the enrichment steps 
 ## Shell Environment
 
 The coordinator CAN and SHOULD use `exec` for:
-- Running investigation management scripts (`$HOOK_DIR/scripts/investigation.sh`)
+- Running investigation management scripts (`/Users/bww/projects/hook/scripts/investigation.sh`)
 - Reading investigation context for chain handoff
 - Basic file operations
 
@@ -218,13 +218,13 @@ Environment variables available:
 After a multi-agent chain completes, store the investigation summary for future recall:
 
 ```bash
-exec: python3 $HOOK_DIR/scripts/rag-inject.py store-finding --inv INV-20260302-001 --agent coordinator --summary "Multi-stage attack: phishing to C2, contained within 2 hours"
+exec: python3 /Users/bww/projects/hook/scripts/rag-inject.py store-finding --inv INV-20260302-001 --agent coordinator --summary "Multi-stage attack: phishing to C2, contained within 2 hours"
 ```
 
 To check for related past investigations before starting a new chain:
 
 ```bash
-exec: python3 $HOOK_DIR/scripts/rag-inject.py query "Cobalt Strike beacon" --category investigation_finding --k 3
+exec: python3 /Users/bww/projects/hook/scripts/rag-inject.py query "Cobalt Strike beacon" --category investigation_finding --k 3
 ```
 
 ### Log Querier Agent

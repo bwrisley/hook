@@ -59,4 +59,7 @@ tests/results/
 
 # Misc
 *.old
-#hook
+\#hook
+data/cache/
+docs/*.docx
+docs/*.pdf

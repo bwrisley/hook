@@ -268,30 +268,30 @@ The enrichment scripts handle validation, rate limiting, caching, and structured
 
 ### IP Enrichment (VT + AbuseIPDB + Censys + DNS)
 ```bash
-exec: $HOOK_DIR/scripts/enrich-ip.sh 45.77.65.211
+exec: /Users/bww/projects/hook/scripts/enrich-ip.sh 45.77.65.211
 ```
 
 ### Domain Enrichment (VT + DNS + WHOIS)
 ```bash
-exec: $HOOK_DIR/scripts/enrich-domain.sh evil-update.com
+exec: /Users/bww/projects/hook/scripts/enrich-domain.sh evil-update.com
 ```
 
 ### Hash Enrichment (VT)
 ```bash
-exec: $HOOK_DIR/scripts/enrich-hash.sh e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+exec: /Users/bww/projects/hook/scripts/enrich-hash.sh e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 ```
 
 ### Force Fresh Enrichment (skip cache)
 ```bash
-exec: $HOOK_DIR/scripts/enrich-ip.sh --no-cache 45.77.65.211
-exec: $HOOK_DIR/scripts/enrich-domain.sh --no-cache evil-update.com
-exec: $HOOK_DIR/scripts/enrich-hash.sh --no-cache abc123def456
+exec: /Users/bww/projects/hook/scripts/enrich-ip.sh --no-cache 45.77.65.211
+exec: /Users/bww/projects/hook/scripts/enrich-domain.sh --no-cache evil-update.com
+exec: /Users/bww/projects/hook/scripts/enrich-hash.sh --no-cache abc123def456
 ```
 
 ### Batch Enrichment
 ```bash
 echo '{"ips":["45.77.65.211","8.8.8.8"],"domains":["evil.com"],"hashes":[]}' \
-  | $HOOK_DIR/scripts/enrich-batch.sh
+  | /Users/bww/projects/hook/scripts/enrich-batch.sh
 ```
 
 All scripts return structured JSON with a `risk` field (HIGH/MEDIUM/LOW) and a `sources` object with per-API findings. Cached results include a `_cache` field with `hit: true`, `age_hours`, and `ttl_hours`.
@@ -312,22 +312,22 @@ Enrichment results are cached locally to avoid redundant API calls and conserve 
 ### Cache Management
 ```bash
 # View cache statistics
-exec: $HOOK_DIR/scripts/ioc-cache.sh stats
+exec: /Users/bww/projects/hook/scripts/ioc-cache.sh stats
 
 # Look up a specific cached IOC
-exec: $HOOK_DIR/scripts/ioc-cache.sh lookup 45.77.65.211
+exec: /Users/bww/projects/hook/scripts/ioc-cache.sh lookup 45.77.65.211
 
 # List all cached IOCs
-exec: $HOOK_DIR/scripts/ioc-cache.sh list
+exec: /Users/bww/projects/hook/scripts/ioc-cache.sh list
 
 # List cached IPs only
-exec: $HOOK_DIR/scripts/ioc-cache.sh list ip
+exec: /Users/bww/projects/hook/scripts/ioc-cache.sh list ip
 
 # Clear expired entries (safe maintenance)
-exec: $HOOK_DIR/scripts/ioc-cache.sh clear --stale
+exec: /Users/bww/projects/hook/scripts/ioc-cache.sh clear --stale
 
 # Clear everything
-exec: $HOOK_DIR/scripts/ioc-cache.sh clear
+exec: /Users/bww/projects/hook/scripts/ioc-cache.sh clear
 ```
 
 ### When to use --no-cache
@@ -355,7 +355,7 @@ All API calls must use `exec` tool, NOT `web_fetch` (Cloudflare blocks browser r
 Before enriching an IOC, check if HOOK has seen it before:
 
 ```bash
-exec: python3 $HOOK_DIR/scripts/rag-inject.py query "45.77.65.211" --category ioc_verdict --k 3
+exec: python3 /Users/bww/projects/hook/scripts/rag-inject.py query "45.77.65.211" --category ioc_verdict --k 3
 ```
 
 This returns past verdicts for the IOC. If a recent verdict exists with high confidence, reference it in your analysis rather than re-enriching from scratch.
@@ -363,7 +363,7 @@ This returns past verdicts for the IOC. If a recent verdict exists with high con
 After completing enrichment, store the verdict for future recall:
 
 ```bash
-exec: python3 $HOOK_DIR/scripts/rag-inject.py store-verdict --ioc "45.77.65.211" --type ip --verdict "HIGH risk, Cobalt Strike C2 beacon" --confidence high
+exec: python3 /Users/bww/projects/hook/scripts/rag-inject.py store-verdict --ioc "45.77.65.211" --type ip --verdict "HIGH risk, Cobalt Strike C2 beacon" --confidence high
 ```
 
 This builds HOOK's institutional memory across investigations.

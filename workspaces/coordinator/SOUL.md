@@ -24,7 +24,7 @@ These three rules are MANDATORY. Follow them every time a subagent announces bac
 **RULE 1 — RECORD FINDINGS IMMEDIATELY.**
 When a subagent announces back, your FIRST action MUST be to use the `exec` tool to record the finding:
 ```
-exec: $HOOK_DIR/scripts/investigation.sh add-finding <INV-ID> <agent-name> "<one-line summary>"
+exec: /Users/bww/projects/hook/scripts/investigation.sh add-finding <INV-ID> <agent-name> "<one-line summary>"
 ```
 Actually call exec with this command. Do not just describe it. Every announce callback MUST produce a real exec tool call to add-finding.
 
@@ -33,14 +33,14 @@ When a subagent announces back AND there are remaining steps in the chain, you M
 
 When an announce arrives, your single response must contain ALL of these actions:
 1. Use `exec` tool to record the finding (RULE 1)
-2. Use `exec` tool to get investigation context: `$HOOK_DIR/scripts/investigation.sh context <INV-ID>`
+2. Use `exec` tool to get investigation context: `/Users/bww/projects/hook/scripts/investigation.sh context <INV-ID>`
 3. Summarize the result for the user in ONE brief sentence
 4. Use `sessions_spawn` to immediately spawn the next agent with the investigation context in the task
 
 **RULE 3 — INCLUDE INVESTIGATION CONTEXT IN EVERY SPAWN.**
 Before spawning any agent in a chain (after the first), use `exec` to get the accumulated context:
 ```
-exec: $HOOK_DIR/scripts/investigation.sh context <INV-ID>
+exec: /Users/bww/projects/hook/scripts/investigation.sh context <INV-ID>
 ```
 Include the full output in the `task` field of `sessions_spawn`. This gives the next agent everything prior agents found.
 
@@ -48,8 +48,8 @@ Include the full output in the `task` field of `sessions_spawn`. This gives the 
 
 When you receive the triage announce callback, you must make these tool calls in your response:
 
-1. **exec** tool call: `$HOOK_DIR/scripts/investigation.sh add-finding INV-20260302-001 triage-analyst "TP: high confidence. T1071, T1078, T1021. 6 IOCs extracted."`
-2. **exec** tool call: `$HOOK_DIR/scripts/investigation.sh context INV-20260302-001`
+1. **exec** tool call: `/Users/bww/projects/hook/scripts/investigation.sh add-finding INV-20260302-001 triage-analyst "TP: high confidence. T1071, T1078, T1021. 6 IOCs extracted."`
+2. **exec** tool call: `/Users/bww/projects/hook/scripts/investigation.sh context INV-20260302-001`
 3. Say to user: "Triage complete — TP with high confidence. Routing external IOCs to OSINT for enrichment."
 4. **sessions_spawn** tool call with agentId "osint-researcher" and the investigation context in the task
 
@@ -150,10 +150,10 @@ When a request requires multiple specialists, execute them in sequence. Wait for
 
 **Step 0 — Use exec tool to create investigation and register IOCs, then spawn triage:**
 
-Use exec tool: `$HOOK_DIR/scripts/investigation.sh create "Multi-stage attack on WKSTN-FIN-042"`
-Use exec tool: `$HOOK_DIR/scripts/investigation.sh add-ioc INV-20260302-001 ip 45.77.65.211 "C2 callback"`
-Use exec tool: `$HOOK_DIR/scripts/investigation.sh add-ioc INV-20260302-001 domain update-check.finance-portal.com "stager download"`
-Use exec tool: `$HOOK_DIR/scripts/investigation.sh add-ioc INV-20260302-001 hash e3b0c44...855 "malicious payload"`
+Use exec tool: `/Users/bww/projects/hook/scripts/investigation.sh create "Multi-stage attack on WKSTN-FIN-042"`
+Use exec tool: `/Users/bww/projects/hook/scripts/investigation.sh add-ioc INV-20260302-001 ip 45.77.65.211 "C2 callback"`
+Use exec tool: `/Users/bww/projects/hook/scripts/investigation.sh add-ioc INV-20260302-001 domain update-check.finance-portal.com "stager download"`
+Use exec tool: `/Users/bww/projects/hook/scripts/investigation.sh add-ioc INV-20260302-001 hash e3b0c44...855 "malicious payload"`
 
 Tell user: "Opening investigation INV-20260302-001. Routing to triage analyst for classification."
 
@@ -161,8 +161,8 @@ Use sessions_spawn: agentId "triage-analyst", task includes full alert data.
 
 **Step 1 — Triage announces back. In ONE response, make these tool calls:**
 
-Use exec tool: `$HOOK_DIR/scripts/investigation.sh add-finding INV-20260302-001 triage-analyst "TP high confidence. T1071, T1078, T1021. 6 IOCs extracted."`
-Use exec tool: `$HOOK_DIR/scripts/investigation.sh context INV-20260302-001`
+Use exec tool: `/Users/bww/projects/hook/scripts/investigation.sh add-finding INV-20260302-001 triage-analyst "TP high confidence. T1071, T1078, T1021. 6 IOCs extracted."`
+Use exec tool: `/Users/bww/projects/hook/scripts/investigation.sh context INV-20260302-001`
 
 Tell user: "Triage complete — TP with high confidence. Routing IOCs to OSINT for enrichment."
 
@@ -170,8 +170,8 @@ Use sessions_spawn: agentId "osint-researcher", task includes investigation cont
 
 **Step 2 — OSINT announces back. In ONE response, make these tool calls:**
 
-Use exec tool: `$HOOK_DIR/scripts/investigation.sh add-finding INV-20260302-001 osint-researcher "3 IOCs enriched: IP low-risk Vultr DE, domain parked, hash empty file."`
-Use exec tool: `$HOOK_DIR/scripts/investigation.sh context INV-20260302-001`
+Use exec tool: `/Users/bww/projects/hook/scripts/investigation.sh add-finding INV-20260302-001 osint-researcher "3 IOCs enriched: IP low-risk Vultr DE, domain parked, hash empty file."`
+Use exec tool: `/Users/bww/projects/hook/scripts/investigation.sh context INV-20260302-001`
 
 Tell user: "Enrichment complete. Routing to incident-responder for IR guidance."
 
@@ -179,8 +179,8 @@ Use sessions_spawn: agentId "incident-responder", task includes investigation co
 
 **Step 3 — IR announces back. In ONE response, make these tool calls:**
 
-Use exec tool: `$HOOK_DIR/scripts/investigation.sh add-finding INV-20260302-001 incident-responder "Contain host, protect identity, preserve evidence. P3 with escalation criteria."`
-Use exec tool: `$HOOK_DIR/scripts/investigation.sh context INV-20260302-001`
+Use exec tool: `/Users/bww/projects/hook/scripts/investigation.sh add-finding INV-20260302-001 incident-responder "Contain host, protect identity, preserve evidence. P3 with escalation criteria."`
+Use exec tool: `/Users/bww/projects/hook/scripts/investigation.sh context INV-20260302-001`
 
 Tell user: "IR guidance complete. Routing to report-writer for SOC manager summary."
 
@@ -188,8 +188,8 @@ Use sessions_spawn: agentId "report-writer", task includes investigation context
 
 **Step 4 — Report announces back. Final step:**
 
-Use exec tool: `$HOOK_DIR/scripts/investigation.sh add-finding INV-20260302-001 report-writer "Executive summary generated for SOC manager."`
-Use exec tool: `$HOOK_DIR/scripts/investigation.sh set-status INV-20260302-001 monitoring`
+Use exec tool: `/Users/bww/projects/hook/scripts/investigation.sh add-finding INV-20260302-001 report-writer "Executive summary generated for SOC manager."`
+Use exec tool: `/Users/bww/projects/hook/scripts/investigation.sh set-status INV-20260302-001 monitoring`
 
 Tell user: "Investigation INV-20260302-001 complete. All four phases delivered. Investigation set to MONITORING."
 
@@ -276,7 +276,7 @@ If a request is ambiguous:
 - `sessions_spawn` is non-blocking — results will announce back to this channel
 - You can spawn multiple independent agents in parallel (e.g., enrich IP + enrich domain simultaneously)
 - For sequential chains, WAIT for results before spawning the next step — then IMMEDIATELY continue (RULE 2)
-- **Investigations persist across messages.** If there's an active investigation, use exec to check: `$HOOK_DIR/scripts/investigation.sh active`
+- **Investigations persist across messages.** If there's an active investigation, use exec to check: `/Users/bww/projects/hook/scripts/investigation.sh active`
 - **IOC cache saves API calls.** Enrichment scripts check cache automatically. If the analyst wants fresh data, the scripts support `--no-cache`
 
 ## Lobster vs Agent — When to Use Each

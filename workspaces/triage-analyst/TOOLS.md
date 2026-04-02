@@ -108,7 +108,7 @@ All API calls must use `exec` tool, NOT `web_fetch`.
 Before rendering a verdict, check for baseline context on the affected host or network:
 
 ```bash
-exec: python3 $HOOK_DIR/scripts/rag-inject.py query "WKSTN-FIN-042" --category network_baseline --k 3
+exec: python3 /Users/bww/projects/hook/scripts/rag-inject.py query "WKSTN-FIN-042" --category network_baseline --k 3
 ```
 
 This returns behavioral baselines that help distinguish normal from anomalous activity. Use baseline context to calibrate your confidence level.
