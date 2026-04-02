@@ -171,16 +171,17 @@ class WebSessionDB:
     def get_messages(self, conversation_id: str) -> list[dict]:
         """Get all messages for a conversation."""
         rows = self._conn.execute(
-            "SELECT role, agent, content, msg_type, timestamp FROM messages WHERE conversation_id = ? ORDER BY id",
+            "SELECT id, role, agent, content, msg_type, timestamp FROM messages WHERE conversation_id = ? ORDER BY id",
             (conversation_id,),
         ).fetchall()
         return [
             {
-                "role": r[0],
-                "agent": r[1],
-                "content": r[2],
-                "type": r[3],
-                "timestamp": r[4],
+                "msg_id": r[0],
+                "role": r[1],
+                "agent": r[2],
+                "content": r[3],
+                "type": r[4],
+                "timestamp": r[5],
             }
             for r in rows
         ]
@@ -202,6 +203,17 @@ class WebSessionDB:
             }
             for r in rows
         ]
+
+    def delete_conversation(self, conversation_id: str) -> None:
+        """Delete a conversation and all its messages."""
+        self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
+        self._conn.execute("DELETE FROM conversations WHERE conversation_id = ?", (conversation_id,))
+        self._conn.commit()
+
+    def delete_message(self, message_id: int) -> None:
+        """Delete a single message by its row ID."""
+        self._conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+        self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
@@ -324,6 +336,19 @@ Current request: {body.message}"""
         _validate_id(conversation_id, "conversation ID")
         web_db: WebSessionDB = app.state.web_db
         return {"messages": web_db.get_messages(conversation_id)}
+
+    @app.delete("/api/conversations/{conversation_id}")
+    async def delete_conversation(conversation_id: str) -> dict[str, str]:
+        _validate_id(conversation_id, "conversation ID")
+        web_db: WebSessionDB = app.state.web_db
+        web_db.delete_conversation(conversation_id)
+        return {"status": "ok"}
+
+    @app.delete("/api/messages/{message_id}")
+    async def delete_message(message_id: int) -> dict[str, str]:
+        web_db: WebSessionDB = app.state.web_db
+        web_db.delete_message(message_id)
+        return {"status": "ok"}
 
     @app.get("/api/investigations")
     async def investigations() -> dict[str, Any]:

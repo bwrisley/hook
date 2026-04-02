@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Plus, Send } from 'lucide-react'
+import { Plus, Send, Trash2, X } from 'lucide-react'
 import { api, streamChat, AGENT_LABELS } from '../lib/api.js'
 import AgentBadge from '../components/AgentBadge.jsx'
 
@@ -31,7 +31,6 @@ export default function InvestigatePage() {
       const res = await api.get('/api/conversations')
       const items = res.data.items || []
       setConversations(items)
-      // Auto-select most recent conversation if none is active
       if (autoSelect && !activeId && items.length > 0) {
         navigate(`/investigate/${items[0].conversation_id}`, { replace: true })
       }
@@ -47,7 +46,7 @@ export default function InvestigatePage() {
       const res = await api.get(`/api/conversations/${convId}/messages`)
       const loaded = (res.data.messages || []).map((msg, idx) => ({
         ...msg,
-        id: `${msg.timestamp}-${idx}`,
+        id: msg.msg_id ? `db-${msg.msg_id}` : `${msg.timestamp}-${idx}`,
       }))
       setMessages(loaded)
     } catch {
@@ -72,6 +71,27 @@ export default function InvestigatePage() {
       navigate('/investigate')
     }
     setTimeout(() => inputRef.current?.focus(), 50)
+  }
+
+  const deleteConversation = async (convId, e) => {
+    e.stopPropagation()
+    try {
+      await api.delete(`/api/conversations/${convId}`)
+      if (activeId === convId) {
+        navigate('/investigate')
+        setMessages([])
+      }
+      loadConversations()
+    } catch { /* ignore */ }
+  }
+
+  const deleteMessage = async (msg) => {
+    const msgId = msg.msg_id
+    if (!msgId) return
+    try {
+      await api.delete(`/api/messages/${msgId}`)
+      setMessages((prev) => prev.filter((m) => m.msg_id !== msgId))
+    } catch { /* ignore */ }
   }
 
   const send = async () => {
@@ -188,25 +208,33 @@ export default function InvestigatePage() {
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-3 space-y-2">
           {conversations.map((conv) => (
-            <button
+            <div
               key={conv.conversation_id}
-              className={`w-full rounded-xl border p-3 text-left transition ${
+              className={`group relative rounded-xl border p-3 transition ${
                 activeId === conv.conversation_id
                   ? 'border-accent bg-accent/10'
-                  : 'border-border bg-panel2 hover:border-border hover:bg-panel2'
+                  : 'border-border bg-panel2 hover:bg-panel2'
               }`}
-              onClick={() => navigate(`/investigate/${conv.conversation_id}`)}
             >
-              <div className="truncate font-mono text-xs text-accent">
-                {conv.title || conv.conversation_id}
-              </div>
-              <div className="mt-1 font-mono text-[10px] text-dim">
-                {conv.conversation_id}
-              </div>
-              <div className="mt-1 font-mono text-[10px] text-dim">
-                {conv.last_message_at ? new Date(conv.last_message_at).toLocaleString() : ''}
-              </div>
-            </button>
+              <button
+                className="w-full text-left"
+                onClick={() => navigate(`/investigate/${conv.conversation_id}`)}
+              >
+                <div className="truncate font-mono text-xs text-accent pr-6">
+                  {conv.title || conv.conversation_id}
+                </div>
+                <div className="mt-1 font-mono text-[10px] text-dim">
+                  {conv.last_message_at ? new Date(conv.last_message_at).toLocaleString() : ''}
+                </div>
+              </button>
+              <button
+                className="absolute right-2 top-3 hidden text-dim hover:text-danger group-hover:block"
+                onClick={(e) => deleteConversation(conv.conversation_id, e)}
+                title="Delete conversation"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
           ))}
         </div>
       </div>
@@ -243,7 +271,7 @@ export default function InvestigatePage() {
               </div>
             )}
             {messages.map((msg) => (
-              <div key={msg.id} className={`rounded-xl border p-4 ${getBorderClass(msg)}`}>
+              <div key={msg.id} className={`group relative rounded-xl border p-4 ${getBorderClass(msg)}`}>
                 <div className="mb-2 flex items-center gap-2">
                   {msg.agent ? (
                     <AgentBadge agentId={msg.agent} />
@@ -255,6 +283,15 @@ export default function InvestigatePage() {
                   <span className="font-mono text-[10px] text-dim">
                     {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
                   </span>
+                  {msg.msg_id && (
+                    <button
+                      className="ml-auto hidden text-dim hover:text-danger group-hover:block"
+                      onClick={() => deleteMessage(msg)}
+                      title="Delete message"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
                 <div className="markdown text-sm">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
