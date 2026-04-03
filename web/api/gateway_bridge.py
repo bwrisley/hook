@@ -2,8 +2,8 @@
 web/api/gateway_bridge.py -- Bridge between Shadowbox web API and OpenClaw gateway.
 
 Uses the `openclaw agent` CLI to send messages to agents and capture responses.
-When the coordinator delegates to a specialist via sessions_spawn, the bridge
-detects this and runs a follow-up call to get the specialist's results.
+When the coordinator delegates to specialists, the bridge detects the chain
+plan and runs each specialist sequentially, passing accumulated context.
 """
 from __future__ import annotations
 
@@ -21,49 +21,79 @@ logger = logging.getLogger(__name__)
 
 AGENT_TIMEOUT = 180  # seconds
 
-# Patterns that indicate the coordinator delegated to a specialist
-SPAWN_PATTERNS = [
-    r"routing to (\S+)",
-    r"spawning (\S+)",
-    r"sessions_spawn.*agentId.*?[\"'](\S+?)[\"']",
-    r"delegat\w+ to (\S+)",
-]
-
 SPECIALIST_AGENTS = {
     "triage-analyst", "osint-researcher", "incident-responder",
     "threat-intel", "report-writer", "log-querier",
 }
 
+# Map common references to agent IDs
+AGENT_ALIASES = {
+    "triage": "triage-analyst",
+    "triage-analyst": "triage-analyst",
+    "osint": "osint-researcher",
+    "osint-researcher": "osint-researcher",
+    "incident": "incident-responder",
+    "incident-responder": "incident-responder",
+    "threat-intel": "threat-intel",
+    "threat": "threat-intel",
+    "report": "report-writer",
+    "report-writer": "report-writer",
+    "log-querier": "log-querier",
+    "log": "log-querier",
+}
 
-def _detect_delegation(text: str) -> Optional[str]:
-    """Detect if the coordinator delegated to a specialist. Returns agent ID or None."""
+
+def _detect_chain(text: str) -> list[str]:
+    """Detect which specialists the coordinator plans to chain.
+
+    Returns an ordered list of agent IDs found in the coordinator's response.
+    """
     lower = text.lower()
-    for pattern in SPAWN_PATTERNS:
-        match = re.search(pattern, lower)
+    found = []
+    seen = set()
+
+    # Look for agent IDs mentioned in routing context
+    for agent in SPECIALIST_AGENTS:
+        if agent in lower and agent not in seen:
+            found.append(agent)
+            seen.add(agent)
+
+    return found
+
+
+def _detect_single_delegation(text: str) -> Optional[str]:
+    """Detect if coordinator delegated to exactly one specialist."""
+    chain = _detect_chain(text)
+    patterns = [
+        r"routing to (\S+)",
+        r"spawning (\S+)",
+        r"delegat\w+ to (\S+)",
+        r"route.*?to (\S+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text.lower())
         if match:
             candidate = match.group(1).strip(".,;:\"'")
-            if candidate in SPECIALIST_AGENTS:
-                return candidate
-            # Partial match — check if any agent ID is in the text
-            for agent in SPECIALIST_AGENTS:
-                if agent in lower:
-                    return agent
+            resolved = AGENT_ALIASES.get(candidate)
+            if resolved:
+                return resolved
+    # If only one specialist mentioned, that's the delegation
+    if len(chain) == 1:
+        return chain[0]
     return None
 
 
 class GatewayBridge:
     """Bridge between Shadowbox's web API and the OpenClaw gateway.
 
-    Uses `openclaw agent` CLI for message delivery and response capture.
-    When the coordinator delegates, automatically follows up with the
-    specialist agent to get the actual results.
+    Uses `openclaw agent` CLI for message delivery. Detects multi-agent
+    chains and runs each specialist sequentially with accumulated context.
     """
 
     def __init__(self) -> None:
         self._openclaw_bin = self._find_openclaw()
 
     def _find_openclaw(self) -> str:
-        """Locate the openclaw binary."""
         for path in [
             "/opt/homebrew/bin/openclaw",
             "/usr/local/bin/openclaw",
@@ -77,7 +107,6 @@ class GatewayBridge:
         pass
 
     async def health_check(self) -> dict[str, Any]:
-        """Check if the OpenClaw gateway is reachable."""
         try:
             proc = await asyncio.create_subprocess_exec(
                 self._openclaw_bin, "gateway", "status",
@@ -85,15 +114,10 @@ class GatewayBridge:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-            output = stdout.decode()
-            if "running" in output.lower() or proc.returncode == 0:
+            if "running" in stdout.decode().lower() or proc.returncode == 0:
                 return {"status": "ok", "gateway": "openclaw CLI"}
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, FileNotFoundError, Exception):
             pass
-        except FileNotFoundError:
-            return {"status": "unreachable", "error": "openclaw binary not found"}
-        except Exception as exc:
-            logger.warning("Gateway health check failed: %s", exc)
         return {"status": "unreachable", "gateway": "openclaw CLI"}
 
     async def get_agents(self) -> list[dict[str, Any]]:
@@ -107,8 +131,7 @@ class GatewayBridge:
     ) -> AsyncGenerator[str, None]:
         """Send a message to an agent and yield SSE events.
 
-        If the coordinator delegates to a specialist, automatically
-        runs the specialist and returns its results.
+        Detects multi-agent chains and runs each specialist sequentially.
         """
         session_id = session_key or str(uuid.uuid4())[:12]
 
@@ -122,7 +145,7 @@ class GatewayBridge:
             "content": "Processing request...",
         })
 
-        # Run the agent
+        # Run the coordinator (or direct agent)
         result = await self._run_agent(agent_id, message, session_key)
 
         if result is None:
@@ -131,53 +154,66 @@ class GatewayBridge:
             return
 
         response_text = result["text"]
-        meta = result["meta"]
 
-        # Check if the coordinator delegated to a specialist
-        delegated_to = _detect_delegation(response_text) if agent_id == "coordinator" else None
-
-        if delegated_to:
-            # Show the coordinator's routing message
-            yield sse_event("coordinator", {
-                "agent": "coordinator",
-                "content": response_text,
-            })
-
-            # Now run the specialist directly
-            yield sse_event("agent_start", {
-                "agent": delegated_to,
-                "content": f"Running {delegated_to}...",
-            })
-
-            # Build a context-enriched message for the specialist
-            # Include the coordinator's routing context so the specialist has full findings
-            specialist_message = f"""Context from coordinator (Marshall):
-{response_text}
-
-Original operator request: {message}
-
-Complete the task described above. Use the context provided by the coordinator."""
-            specialist_result = await self._run_agent(delegated_to, specialist_message)
-
-            if specialist_result:
-                yield sse_event("agent_result", {
-                    "agent": delegated_to,
-                    "content": specialist_result["text"],
-                    "highlights": extract_highlights(specialist_result["text"]),
-                    "meta": specialist_result["meta"],
-                })
-            else:
-                yield sse_event("error", {
-                    "message": f"Specialist {delegated_to} did not return results",
-                })
-        else:
-            # Direct response (no delegation)
+        # If not coordinator, just return the result directly
+        if agent_id != "coordinator":
             yield sse_event("agent_result", {
                 "agent": agent_id,
                 "content": response_text,
                 "highlights": extract_highlights(response_text),
-                "meta": meta,
+                "meta": result["meta"],
             })
+            yield sse_event("done", {"session_key": session_id})
+            return
+
+        # Coordinator response — detect chain
+        chain = _detect_chain(response_text)
+
+        if not chain:
+            # No delegation — coordinator handled it directly
+            yield sse_event("agent_result", {
+                "agent": "coordinator",
+                "content": response_text,
+                "highlights": extract_highlights(response_text),
+                "meta": result["meta"],
+            })
+            yield sse_event("done", {"session_key": session_id})
+            return
+
+        # Show Marshall's routing plan
+        yield sse_event("coordinator", {
+            "agent": "coordinator",
+            "content": response_text,
+        })
+
+        # Run each specialist in the chain sequentially
+        accumulated_findings = f"Original request: {message}\n\nMarshall's routing plan:\n{response_text}\n"
+
+        for specialist in chain:
+            yield sse_event("agent_start", {
+                "agent": specialist,
+                "content": f"Running {specialist}...",
+            })
+
+            specialist_message = f"""{accumulated_findings}
+You are the next agent in the chain. Complete your specific task based on the context above.
+Focus on your expertise. Use the findings from prior agents in the chain."""
+
+            specialist_result = await self._run_agent(specialist, specialist_message)
+
+            if specialist_result:
+                yield sse_event("agent_result", {
+                    "agent": specialist,
+                    "content": specialist_result["text"],
+                    "highlights": extract_highlights(specialist_result["text"]),
+                    "meta": specialist_result["meta"],
+                })
+                # Accumulate findings for next agent in chain
+                accumulated_findings += f"\n\n--- {specialist} findings ---\n{specialist_result['text']}\n"
+            else:
+                yield sse_event("error", {
+                    "message": f"{specialist} did not return results",
+                })
 
         yield sse_event("done", {"session_key": session_id})
 
@@ -187,10 +223,7 @@ Complete the task described above. Use the context provided by the coordinator."
         message: str,
         session_key: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
-        """Run an openclaw agent command and return parsed result.
-
-        Returns dict with 'text' and 'meta' keys, or None on failure.
-        """
+        """Run an openclaw agent command and return parsed result."""
         cmd = [
             self._openclaw_bin, "agent",
             "--agent", agent_id,
