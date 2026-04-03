@@ -21,30 +21,36 @@ const colorTextMap = {
   dim: 'text-dim',
 }
 
+function timeAgo(isoString) {
+  if (!isoString) return 'never'
+  const diff = Date.now() - new Date(isoString).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
+}
+
 export default function AgentsPage() {
   const [agents, setAgents] = useState([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await api.get('/api/agents')
-        setAgents(res.data.agents || [])
-      } catch {
-        setAgents([
-          { id: 'coordinator', model: 'openai/gpt-4.1' },
-          { id: 'triage-analyst', model: 'openai/gpt-4.1' },
-          { id: 'osint-researcher', model: 'openai/gpt-4.1' },
-          { id: 'incident-responder', model: 'openai/gpt-5' },
-          { id: 'threat-intel', model: 'openai/gpt-5' },
-          { id: 'report-writer', model: 'openai/gpt-4.1' },
-          { id: 'log-querier', model: 'openai/gpt-4.1' },
-        ])
-      } finally {
-        setLoading(false)
-      }
+  const load = async () => {
+    try {
+      const res = await api.get('/api/agents')
+      setAgents(res.data.agents || [])
+    } catch {
+      setAgents([])
+    } finally {
+      setLoading(false)
     }
+  }
+
+  useEffect(() => {
     load()
+    const interval = setInterval(load, 5000)
+    return () => clearInterval(interval)
   }, [])
 
   if (loading) {
@@ -61,6 +67,7 @@ export default function AgentsPage() {
           const textClass = colorTextMap[color] || 'text-dim'
           const callsign = AGENT_LABELS[agent.id] || agent.id
           const role = AGENT_ROLES[agent.id] || agent.role || ''
+          const isWorking = agent.status === 'working'
 
           return (
             <div key={agent.id} className={`panel p-5 ${borderClass}`}>
@@ -68,7 +75,16 @@ export default function AgentsPage() {
                 <div className={`font-mono text-sm font-bold uppercase tracking-[0.16em] ${textClass}`}>
                   {callsign}
                 </div>
-                <div className="badge badge-accent">active</div>
+                {isWorking ? (
+                  <span className="badge badge-amber">
+                    <span className="activity-ellipsis mr-1" aria-hidden="true">
+                      <span /><span /><span />
+                    </span>
+                    working
+                  </span>
+                ) : (
+                  <span className="badge badge-accent">idle</span>
+                )}
               </div>
               <div className="mt-1 font-mono text-[11px] text-dim">{agent.id}</div>
               <div className="mt-3 text-sm text-text">{role}</div>
@@ -76,6 +92,16 @@ export default function AgentsPage() {
                 <div className="kv">
                   <span className="font-mono text-xs text-dim">Model</span>
                   <span className="font-mono text-xs text-text">{agent.model || 'default'}</span>
+                </div>
+                <div className="kv">
+                  <span className="font-mono text-xs text-dim">Messages</span>
+                  <span className="font-mono text-xs text-text">{agent.message_count || 0}</span>
+                </div>
+                <div className="kv">
+                  <span className="font-mono text-xs text-dim">Last Active</span>
+                  <span className="font-mono text-xs text-text">
+                    {timeAgo(agent.last_active || agent.last_finished)}
+                  </span>
                 </div>
               </div>
             </div>

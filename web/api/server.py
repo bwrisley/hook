@@ -87,6 +87,28 @@ def _mask_secrets(config: dict) -> dict:
 
 # -- Web session DB --
 
+class AgentTracker:
+    """Tracks agent activity for the live status page."""
+
+    def __init__(self) -> None:
+        self._activity: dict[str, dict] = {}
+
+    def record_start(self, agent_id: str) -> None:
+        self._activity[agent_id] = {
+            "status": "working",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+        }
+
+    def record_done(self, agent_id: str) -> None:
+        if agent_id in self._activity:
+            self._activity[agent_id]["status"] = "idle"
+            self._activity[agent_id]["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    def get_status(self) -> dict[str, dict]:
+        return dict(self._activity)
+
+
 class WebSessionDB:
     """SQLite store for web conversations and message history."""
 
@@ -225,10 +247,13 @@ def create_app() -> FastAPI:
     bridge = GatewayBridge()
     db_path = str(DATA_DIR / "hook-web.db")
 
+    tracker = AgentTracker()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.bridge = bridge
         app.state.web_db = WebSessionDB(db_path)
+        app.state.tracker = tracker
         yield
         await bridge.close()
         app.state.web_db.close()
@@ -261,10 +286,35 @@ def create_app() -> FastAPI:
 
     @app.get("/api/agents")
     async def agents() -> dict[str, Any]:
-        gw_agents = await app.state.bridge.get_agents()
-        if gw_agents:
-            return {"agents": gw_agents}
-        return {"agents": AGENTS, "source": "static"}
+        web_db: WebSessionDB = app.state.web_db
+        activity = app.state.tracker.get_status()
+
+        # Count messages per agent from DB
+        agent_stats = {}
+        try:
+            rows = web_db._conn.execute(
+                "SELECT agent, COUNT(*) as cnt, MAX(timestamp) as last_active "
+                "FROM messages WHERE agent IS NOT NULL GROUP BY agent"
+            ).fetchall()
+            for row in rows:
+                agent_stats[row[0]] = {"message_count": row[1], "last_active": row[2]}
+        except Exception:
+            pass
+
+        enriched = []
+        for agent in AGENTS:
+            aid = agent["id"]
+            live = activity.get(aid, {})
+            stats = agent_stats.get(aid, {})
+            enriched.append({
+                **agent,
+                "status": live.get("status", "idle"),
+                "last_started": live.get("started_at"),
+                "last_finished": live.get("finished_at"),
+                "message_count": stats.get("message_count", 0),
+                "last_active": stats.get("last_active"),
+            })
+        return {"agents": enriched}
 
     @app.post("/api/chat/stream")
     async def chat_stream(body: ChatRequest):
@@ -278,22 +328,39 @@ def create_app() -> FastAPI:
         # Persist the user message
         web_db.add_message(conversation_id, "user", body.message)
 
-        # Build conversation context for multi-turn
+        # Build conversation context for multi-turn continuity
+        CALLSIGNS = {
+            "coordinator": "Marshall", "triage-analyst": "Tara",
+            "osint-researcher": "Hunter", "incident-responder": "Ward",
+            "threat-intel": "Driver", "report-writer": "Page", "log-querier": "Wells",
+        }
         prior_messages = web_db.get_messages(conversation_id)
         context_lines = []
-        # Include up to last 10 messages as context (skip the current one we just added)
-        for msg in prior_messages[:-1][-10:]:
-            role_label = "Operator" if msg["role"] == "user" else (msg.get("agent") or "System")
-            context_lines.append(f"[{role_label}]: {msg['content'][:500]}")
-        conversation_context = "\n".join(context_lines)
+        # Include last 8 exchanges as context (skip the message we just added)
+        # Give full content for agent findings (they contain the investigation data)
+        for msg in prior_messages[:-1][-16:]:
+            if msg["role"] == "user":
+                context_lines.append(f"[Operator]: {msg['content']}")
+            else:
+                agent_name = CALLSIGNS.get(msg.get("agent"), msg.get("agent") or "System")
+                # Include full agent findings — truncating these loses investigation context
+                content = msg["content"]
+                if len(content) > 2000:
+                    content = content[:2000] + "\n[... truncated for context window]"
+                context_lines.append(f"[{agent_name}]: {content}")
+        conversation_context = "\n\n".join(context_lines)
 
         # Build the message with context if there's prior conversation
         message_with_context = body.message
         if conversation_context:
-            message_with_context = f"""Previous conversation:
+            message_with_context = f"""This is an ongoing investigation. Here is the conversation so far:
+
 {conversation_context}
 
-Current request: {body.message}"""
+---
+The operator's new message: {body.message}
+
+Respond to the operator's new message using the full investigation context above. If they reference prior findings ("that IP", "the report", etc.), resolve the reference from the conversation history."""
 
         async def event_stream():
             yield sse_event("meta", {"conversation_id": conversation_id})
@@ -322,10 +389,15 @@ Current request: {body.message}"""
                     new_session_key = event_data["session_key"]
                     web_db.update_session_key(conversation_id, new_session_key)
 
-                # Persist agent responses
+                # Track agent activity
+                if event_type == "agent_start":
+                    tracker.record_start(event_data.get("agent", "coordinator"))
+
+                # Persist agent responses and track completion
                 if event_type in ("agent_result", "coordinator"):
                     content = event_data.get("content", "")
                     agent = event_data.get("agent", "coordinator")
+                    tracker.record_done(agent)
                     if content:
                         web_db.add_message(conversation_id, "assistant", content, agent=agent, msg_type=event_type)
 

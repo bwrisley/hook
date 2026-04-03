@@ -14,6 +14,7 @@ export default function InvestigatePage() {
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [activeAgent, setActiveAgent] = useState(null)
+  const [chainProgress, setChainProgress] = useState([])
   const activeId = conversationId || null
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -24,7 +25,7 @@ export default function InvestigatePage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  useEffect(() => { scrollToBottom() }, [messages])
+  useEffect(() => { scrollToBottom() }, [messages, chainProgress])
 
   const loadConversations = async (autoSelect = false) => {
     try {
@@ -66,6 +67,7 @@ export default function InvestigatePage() {
     setMessages([])
     setInput('')
     setActiveAgent(null)
+    setChainProgress([])
     sessionKeyRef.current = null
     if (activeId) {
       navigate('/investigate')
@@ -106,6 +108,7 @@ export default function InvestigatePage() {
     setMessages((prev) => [...prev, userMsg])
     setBusy(true)
     setActiveAgent('coordinator')
+    setChainProgress([{ agent: 'coordinator', status: 'working', startedAt: Date.now() }])
     setInput('')
     isStreamingRef.current = true
 
@@ -126,18 +129,24 @@ export default function InvestigatePage() {
 
           if (event === 'agent_start') {
             setActiveAgent(payload.agent)
-            setMessages((prev) => [...prev, {
-              id: `${Date.now()}-start-${payload.agent}`,
-              role: 'system',
-              agent: payload.agent,
-              content: `${AGENT_LABELS[payload.agent] || payload.agent} is working...`,
-              timestamp: new Date().toISOString(),
-              type: 'agent_start',
-            }])
+            setChainProgress((prev) => {
+              // Mark previous agent as done
+              const updated = prev.map((p) =>
+                p.status === 'working' ? { ...p, status: 'done', finishedAt: Date.now() } : p
+              )
+              return [...updated, { agent: payload.agent, status: 'working', startedAt: Date.now() }]
+            })
           }
 
           if (event === 'agent_result') {
             setActiveAgent(null)
+            setChainProgress((prev) =>
+              prev.map((p) =>
+                p.agent === payload.agent && p.status === 'working'
+                  ? { ...p, status: 'done', finishedAt: Date.now() }
+                  : p
+              )
+            )
             setMessages((prev) => [...prev, {
               id: `${Date.now()}-result-${payload.agent}`,
               role: 'assistant',
@@ -149,6 +158,13 @@ export default function InvestigatePage() {
           }
 
           if (event === 'coordinator') {
+            setChainProgress((prev) =>
+              prev.map((p) =>
+                p.agent === 'coordinator' && p.status === 'working'
+                  ? { ...p, status: 'done', finishedAt: Date.now() }
+                  : p
+              )
+            )
             setMessages((prev) => [...prev, {
               id: `${Date.now()}-coord`,
               role: 'assistant',
@@ -182,6 +198,7 @@ export default function InvestigatePage() {
       isStreamingRef.current = false
       setBusy(false)
       setActiveAgent(null)
+      setChainProgress([])
       loadConversations()
     }
   }
@@ -198,6 +215,12 @@ export default function InvestigatePage() {
     if (msg.type === 'agent_start') return 'border-amber/20 bg-amber/5'
     if (msg.role === 'user') return 'border-border bg-panel2'
     return 'border-accent/20 bg-accent/5'
+  }
+
+  const formatDuration = (ms) => {
+    if (!ms) return ''
+    const s = Math.round(ms / 1000)
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
   }
 
   return (
@@ -261,7 +284,7 @@ export default function InvestigatePage() {
 
         <div className="panel flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="min-h-0 flex-1 space-y-3 overflow-auto p-5">
-            {messages.length === 0 && (
+            {messages.length === 0 && !busy && (
               <div className="flex h-full items-center justify-center">
                 <div className="text-center">
                   <div className="font-mono text-sm uppercase tracking-[0.18em] text-dim">
@@ -301,6 +324,41 @@ export default function InvestigatePage() {
                 </div>
               </div>
             ))}
+
+            {/* Chain progress indicator */}
+            {busy && chainProgress.length > 0 && (
+              <div className="rounded-xl border border-accent/20 bg-accent/5 p-4">
+                <div className="mb-3 font-mono text-xs uppercase tracking-[0.16em] text-accent">
+                  Chain Progress
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {chainProgress.map((step, idx) => {
+                    const label = AGENT_LABELS[step.agent] || step.agent
+                    const duration = step.finishedAt ? formatDuration(step.finishedAt - step.startedAt) : ''
+                    return (
+                      <div key={`${step.agent}-${idx}`} className="flex items-center gap-1.5">
+                        {idx > 0 && <span className="text-dim">&#8250;</span>}
+                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] ${
+                          step.status === 'working'
+                            ? 'border-accent/40 bg-accent/15 text-accent'
+                            : 'border-safe/30 bg-safe/10 text-safe'
+                        }`}>
+                          {step.status === 'working' && (
+                            <span className="activity-ellipsis" aria-hidden="true">
+                              <span /><span /><span />
+                            </span>
+                          )}
+                          {step.status === 'done' && <span>&#10003;</span>}
+                          {label}
+                          {duration && <span className="text-dim ml-1">{duration}</span>}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             <div ref={messagesEndRef} />
           </div>
 
