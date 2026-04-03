@@ -32,14 +32,31 @@ function timeAgo(isoString) {
   return `${Math.floor(hours / 24)}d ago`
 }
 
+function formatTokens(n) {
+  if (!n) return '0'
+  if (n < 1000) return String(n)
+  if (n < 1000000) return `${(n / 1000).toFixed(1)}k`
+  return `${(n / 1000000).toFixed(2)}M`
+}
+
+function formatDuration(ms) {
+  if (!ms) return '0s'
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  return `${m}m ${s % 60}s`
+}
+
 export default function AgentsPage() {
   const [agents, setAgents] = useState([])
+  const [totals, setTotals] = useState({})
   const [loading, setLoading] = useState(true)
 
   const load = async () => {
     try {
       const res = await api.get('/api/agents')
       setAgents(res.data.agents || [])
+      setTotals(res.data.totals || {})
     } catch {
       setAgents([])
     } finally {
@@ -59,7 +76,32 @@ export default function AgentsPage() {
 
   return (
     <div>
-      <h1 className="mb-6 font-mono text-sm font-bold uppercase tracking-[0.18em] text-accent">Agents</h1>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="font-mono text-sm font-bold uppercase tracking-[0.18em] text-accent">Agents</h1>
+      </div>
+
+      {/* Usage summary bar */}
+      <div className="mb-6 panel p-4">
+        <div className="flex items-center justify-between">
+          <div className="font-mono text-xs uppercase tracking-[0.16em] text-accent">Usage Summary</div>
+        </div>
+        <div className="mt-3 flex gap-8">
+          <div>
+            <div className="font-mono text-2xl font-bold text-text">{formatTokens(totals.total_tokens)}</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-dim">Total Tokens</div>
+          </div>
+          <div>
+            <div className="font-mono text-2xl font-bold text-text">{totals.total_calls || 0}</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-dim">API Calls</div>
+          </div>
+          <div>
+            <div className="font-mono text-2xl font-bold text-text">{formatDuration(totals.total_duration_ms)}</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-dim">Total Compute</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Agent cards */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {agents.map((agent) => {
           const color = AGENT_COLORS[agent.id] || 'dim'
@@ -94,8 +136,16 @@ export default function AgentsPage() {
                   <span className="font-mono text-xs text-text">{agent.model || 'default'}</span>
                 </div>
                 <div className="kv">
-                  <span className="font-mono text-xs text-dim">Messages</span>
-                  <span className="font-mono text-xs text-text">{agent.message_count || 0}</span>
+                  <span className="font-mono text-xs text-dim">API Calls</span>
+                  <span className="font-mono text-xs text-text">{agent.total_calls || 0}</span>
+                </div>
+                <div className="kv">
+                  <span className="font-mono text-xs text-dim">Tokens Used</span>
+                  <span className="font-mono text-xs text-text">{formatTokens(agent.total_tokens)}</span>
+                </div>
+                <div className="kv">
+                  <span className="font-mono text-xs text-dim">Compute Time</span>
+                  <span className="font-mono text-xs text-text">{formatDuration(agent.total_duration_ms)}</span>
                 </div>
                 <div className="kv">
                   <span className="font-mono text-xs text-dim">Last Active</span>

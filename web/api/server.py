@@ -88,10 +88,25 @@ def _mask_secrets(config: dict) -> dict:
 # -- Web session DB --
 
 class AgentTracker:
-    """Tracks agent activity for the live status page."""
+    """Tracks agent activity and token usage."""
 
-    def __init__(self) -> None:
+    def __init__(self, db_path: str) -> None:
         self._activity: dict[str, dict] = {}
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS token_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent TEXT NOT NULL,
+                model TEXT,
+                tokens_in INTEGER DEFAULT 0,
+                tokens_out INTEGER DEFAULT 0,
+                tokens_total INTEGER DEFAULT 0,
+                duration_ms INTEGER DEFAULT 0,
+                conversation_id TEXT,
+                timestamp TEXT NOT NULL
+            )
+        """)
+        self._conn.commit()
 
     def record_start(self, agent_id: str) -> None:
         self._activity[agent_id] = {
@@ -100,13 +115,67 @@ class AgentTracker:
             "finished_at": None,
         }
 
-    def record_done(self, agent_id: str) -> None:
+    def record_done(self, agent_id: str, meta: dict | None = None, conversation_id: str | None = None) -> None:
         if agent_id in self._activity:
             self._activity[agent_id]["status"] = "idle"
             self._activity[agent_id]["finished_at"] = datetime.now(timezone.utc).isoformat()
 
+        if meta:
+            now = datetime.now(timezone.utc).isoformat()
+            self._conn.execute(
+                "INSERT INTO token_usage (agent, model, tokens_in, tokens_out, tokens_total, duration_ms, conversation_id, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    agent_id,
+                    meta.get("model", ""),
+                    meta.get("tokens_in", 0),
+                    meta.get("tokens_out", 0),
+                    meta.get("tokens", 0),
+                    meta.get("duration_ms", 0),
+                    conversation_id,
+                    now,
+                ),
+            )
+            self._conn.commit()
+
     def get_status(self) -> dict[str, dict]:
         return dict(self._activity)
+
+    def get_agent_stats(self) -> dict[str, dict]:
+        """Get per-agent token usage totals."""
+        rows = self._conn.execute("""
+            SELECT agent,
+                   COUNT(*) as calls,
+                   SUM(tokens_total) as total_tokens,
+                   SUM(duration_ms) as total_duration_ms,
+                   MAX(timestamp) as last_used
+            FROM token_usage GROUP BY agent
+        """).fetchall()
+        return {
+            r[0]: {
+                "calls": r[1],
+                "total_tokens": r[2] or 0,
+                "total_duration_ms": r[3] or 0,
+                "last_used": r[4],
+            }
+            for r in rows
+        }
+
+    def get_totals(self) -> dict:
+        """Get overall token usage totals."""
+        row = self._conn.execute("""
+            SELECT COUNT(*) as calls,
+                   SUM(tokens_total) as total_tokens,
+                   SUM(duration_ms) as total_duration_ms
+            FROM token_usage
+        """).fetchone()
+        return {
+            "total_calls": row[0] or 0,
+            "total_tokens": row[1] or 0,
+            "total_duration_ms": row[2] or 0,
+        }
+
+    def close(self) -> None:
+        self._conn.close()
 
 
 class WebSessionDB:
@@ -247,7 +316,7 @@ def create_app() -> FastAPI:
     bridge = GatewayBridge()
     db_path = str(DATA_DIR / "hook-web.db")
 
-    tracker = AgentTracker()
+    tracker = AgentTracker(db_path)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -257,6 +326,7 @@ def create_app() -> FastAPI:
         yield
         await bridge.close()
         app.state.web_db.close()
+        tracker.close()
 
     app = FastAPI(title="HOOK Web API", lifespan=lifespan)
     app.add_middleware(
@@ -288,6 +358,8 @@ def create_app() -> FastAPI:
     async def agents() -> dict[str, Any]:
         web_db: WebSessionDB = app.state.web_db
         activity = app.state.tracker.get_status()
+        token_stats = app.state.tracker.get_agent_stats()
+        totals = app.state.tracker.get_totals()
 
         # Count messages per agent from DB
         agent_stats = {}
@@ -306,6 +378,7 @@ def create_app() -> FastAPI:
             aid = agent["id"]
             live = activity.get(aid, {})
             stats = agent_stats.get(aid, {})
+            tokens = token_stats.get(aid, {})
             enriched.append({
                 **agent,
                 "status": live.get("status", "idle"),
@@ -313,8 +386,11 @@ def create_app() -> FastAPI:
                 "last_finished": live.get("finished_at"),
                 "message_count": stats.get("message_count", 0),
                 "last_active": stats.get("last_active"),
+                "total_tokens": tokens.get("total_tokens", 0),
+                "total_calls": tokens.get("calls", 0),
+                "total_duration_ms": tokens.get("total_duration_ms", 0),
             })
-        return {"agents": enriched}
+        return {"agents": enriched, "totals": totals}
 
     @app.post("/api/chat/stream")
     async def chat_stream(body: ChatRequest):
@@ -336,31 +412,29 @@ def create_app() -> FastAPI:
         }
         prior_messages = web_db.get_messages(conversation_id)
         context_lines = []
-        # Include last 8 exchanges as context (skip the message we just added)
-        # Give full content for agent findings (they contain the investigation data)
-        for msg in prior_messages[:-1][-16:]:
+        # Compact context: user messages in full, agent findings truncated to key data
+        for msg in prior_messages[:-1][-12:]:
             if msg["role"] == "user":
                 context_lines.append(f"[Operator]: {msg['content']}")
             else:
                 agent_name = CALLSIGNS.get(msg.get("agent"), msg.get("agent") or "System")
-                # Include full agent findings — truncating these loses investigation context
                 content = msg["content"]
-                if len(content) > 2000:
-                    content = content[:2000] + "\n[... truncated for context window]"
+                # Truncate long agent findings to first 400 chars for context
+                # The full findings are available if the operator asks for detail
+                if len(content) > 400:
+                    content = content[:400] + " [...]"
                 context_lines.append(f"[{agent_name}]: {content}")
-        conversation_context = "\n\n".join(context_lines)
+        conversation_context = "\n".join(context_lines)
 
         # Build the message with context if there's prior conversation
         message_with_context = body.message
         if conversation_context:
-            message_with_context = f"""This is an ongoing investigation. Here is the conversation so far:
-
+            message_with_context = f"""Conversation context:
 {conversation_context}
 
----
-The operator's new message: {body.message}
+Operator: {body.message}
 
-Respond to the operator's new message using the full investigation context above. If they reference prior findings ("that IP", "the report", etc.), resolve the reference from the conversation history."""
+Respond to the operator's latest message. Use the conversation context to resolve references ("that IP", "the report", etc.). If they need a specialist, route to one."""
 
         async def event_stream():
             yield sse_event("meta", {"conversation_id": conversation_id})
@@ -393,11 +467,12 @@ Respond to the operator's new message using the full investigation context above
                 if event_type == "agent_start":
                     tracker.record_start(event_data.get("agent", "coordinator"))
 
-                # Persist agent responses and track completion
+                # Persist agent responses and track completion with token usage
                 if event_type in ("agent_result", "coordinator"):
                     content = event_data.get("content", "")
                     agent = event_data.get("agent", "coordinator")
-                    tracker.record_done(agent)
+                    meta = event_data.get("meta", {})
+                    tracker.record_done(agent, meta=meta, conversation_id=conversation_id)
                     if content:
                         web_db.add_message(conversation_id, "assistant", content, agent=agent, msg_type=event_type)
 

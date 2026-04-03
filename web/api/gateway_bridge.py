@@ -275,12 +275,15 @@ Focus on your expertise. Use the findings from prior agents in the chain."""
             agent_meta = result.get("result", {}).get("meta", {}).get("agentMeta", {})
             duration_ms = result.get("result", {}).get("meta", {}).get("durationMs", 0)
 
+            usage = agent_meta.get("usage", {})
             return {
                 "text": response_text,
                 "meta": {
                     "duration_ms": duration_ms,
                     "model": agent_meta.get("model", ""),
-                    "tokens": agent_meta.get("usage", {}).get("total", 0),
+                    "tokens": usage.get("total", 0),
+                    "tokens_in": usage.get("input", 0),
+                    "tokens_out": usage.get("output", 0),
                 },
             }
 
