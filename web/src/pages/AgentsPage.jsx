@@ -47,6 +47,13 @@ function formatDuration(ms) {
   return `${m}m ${s % 60}s`
 }
 
+function formatCost(usd) {
+  if (!usd) return '$0.00'
+  if (usd < 0.01) return `$${usd.toFixed(4)}`
+  if (usd < 1) return `$${usd.toFixed(3)}`
+  return `$${usd.toFixed(2)}`
+}
+
 export default function AgentsPage() {
   const [agents, setAgents] = useState([])
   const [totals, setTotals] = useState({})
@@ -98,6 +105,10 @@ export default function AgentsPage() {
             <div className="font-mono text-2xl font-bold text-text">{formatDuration(totals.total_duration_ms)}</div>
             <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-dim">Total Compute</div>
           </div>
+          <div>
+            <div className="font-mono text-2xl font-bold text-accent">{formatCost(totals.total_cost)}</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-dim">Estimated Cost</div>
+          </div>
         </div>
       </div>
 
@@ -146,6 +157,10 @@ export default function AgentsPage() {
                 <div className="kv">
                   <span className="font-mono text-xs text-dim">Compute Time</span>
                   <span className="font-mono text-xs text-text">{formatDuration(agent.total_duration_ms)}</span>
+                </div>
+                <div className="kv">
+                  <span className="font-mono text-xs text-dim">Cost</span>
+                  <span className="font-mono text-xs text-accent">{formatCost(agent.total_cost)}</span>
                 </div>
                 <div className="kv">
                   <span className="font-mono text-xs text-dim">Last Active</span>

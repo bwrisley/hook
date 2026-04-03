@@ -87,6 +87,24 @@ def _mask_secrets(config: dict) -> dict:
 
 # -- Web session DB --
 
+# OpenAI pricing per 1M tokens (as of 2026-04)
+MODEL_PRICING = {
+    "gpt-4.1":       {"input": 2.00, "output": 8.00},
+    "gpt-4.1-mini":  {"input": 0.40, "output": 1.60},
+    "gpt-4.1-nano":  {"input": 0.10, "output": 0.40},
+    "gpt-4o":        {"input": 2.50, "output": 10.00},
+    "gpt-4o-mini":   {"input": 0.15, "output": 0.60},
+    "gpt-5":         {"input": 10.00, "output": 30.00},
+}
+
+
+def _estimate_cost(model: str, tokens_in: int, tokens_out: int) -> float:
+    """Estimate cost in USD based on model and token counts."""
+    pricing = MODEL_PRICING.get(model, MODEL_PRICING.get("gpt-4.1", {"input": 2.00, "output": 8.00}))
+    cost = (tokens_in / 1_000_000) * pricing["input"] + (tokens_out / 1_000_000) * pricing["output"]
+    return round(cost, 6)
+
+
 class AgentTracker:
     """Tracks agent activity and token usage."""
 
@@ -102,6 +120,7 @@ class AgentTracker:
                 tokens_out INTEGER DEFAULT 0,
                 tokens_total INTEGER DEFAULT 0,
                 duration_ms INTEGER DEFAULT 0,
+                cost_usd REAL DEFAULT 0,
                 conversation_id TEXT,
                 timestamp TEXT NOT NULL
             )
@@ -122,18 +141,14 @@ class AgentTracker:
 
         if meta:
             now = datetime.now(timezone.utc).isoformat()
+            model = meta.get("model", "")
+            tokens_in = meta.get("tokens_in", 0)
+            tokens_out = meta.get("tokens_out", 0)
+            tokens_total = meta.get("tokens", 0)
+            cost = _estimate_cost(model, tokens_in, tokens_out)
             self._conn.execute(
-                "INSERT INTO token_usage (agent, model, tokens_in, tokens_out, tokens_total, duration_ms, conversation_id, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    agent_id,
-                    meta.get("model", ""),
-                    meta.get("tokens_in", 0),
-                    meta.get("tokens_out", 0),
-                    meta.get("tokens", 0),
-                    meta.get("duration_ms", 0),
-                    conversation_id,
-                    now,
-                ),
+                "INSERT INTO token_usage (agent, model, tokens_in, tokens_out, tokens_total, duration_ms, cost_usd, conversation_id, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (agent_id, model, tokens_in, tokens_out, tokens_total, meta.get("duration_ms", 0), cost, conversation_id, now),
             )
             self._conn.commit()
 
@@ -147,6 +162,7 @@ class AgentTracker:
                    COUNT(*) as calls,
                    SUM(tokens_total) as total_tokens,
                    SUM(duration_ms) as total_duration_ms,
+                   SUM(cost_usd) as total_cost,
                    MAX(timestamp) as last_used
             FROM token_usage GROUP BY agent
         """).fetchall()
@@ -155,7 +171,8 @@ class AgentTracker:
                 "calls": r[1],
                 "total_tokens": r[2] or 0,
                 "total_duration_ms": r[3] or 0,
-                "last_used": r[4],
+                "total_cost": round(r[4] or 0, 4),
+                "last_used": r[5],
             }
             for r in rows
         }
@@ -165,13 +182,15 @@ class AgentTracker:
         row = self._conn.execute("""
             SELECT COUNT(*) as calls,
                    SUM(tokens_total) as total_tokens,
-                   SUM(duration_ms) as total_duration_ms
+                   SUM(duration_ms) as total_duration_ms,
+                   SUM(cost_usd) as total_cost
             FROM token_usage
         """).fetchone()
         return {
             "total_calls": row[0] or 0,
             "total_tokens": row[1] or 0,
             "total_duration_ms": row[2] or 0,
+            "total_cost": round(row[3] or 0, 4),
         }
 
     def close(self) -> None:
@@ -389,6 +408,7 @@ def create_app() -> FastAPI:
                 "total_tokens": tokens.get("total_tokens", 0),
                 "total_calls": tokens.get("calls", 0),
                 "total_duration_ms": tokens.get("total_duration_ms", 0),
+                "total_cost": tokens.get("total_cost", 0),
             })
         return {"agents": enriched, "totals": totals}
 
