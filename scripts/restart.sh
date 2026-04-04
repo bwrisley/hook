@@ -13,7 +13,7 @@ set -euo pipefail
 WEB_LABEL="com.punchcyber.hook.web"
 GW_LABEL="ai.openclaw.gateway"
 DAILY_LABEL="ai.openclaw.hook-daily"
-UID=$(id -u)
+USERID=$(id -u)
 
 status() {
     echo "=== Shadowbox Services ==="
@@ -36,7 +36,7 @@ status() {
 
 restart_web() {
     echo "Restarting Shadowbox web..."
-    launchctl kickstart -k "gui/$UID/$WEB_LABEL" 2>/dev/null || {
+    launchctl kickstart -k "gui/$USERID/$WEB_LABEL" 2>/dev/null || {
         # Not loaded — try bootstrap
         lsof -ti:7799 | xargs kill -9 2>/dev/null || true
         launchctl bootstrap "gui/$UID" ~/Library/LaunchAgents/$WEB_LABEL.plist 2>/dev/null || true
@@ -58,7 +58,7 @@ restart_gateway() {
 
 stop_all() {
     echo "Stopping services..."
-    launchctl bootout "gui/$UID/$WEB_LABEL" 2>/dev/null && echo "  Web stopped" || echo "  Web: not running"
+    launchctl bootout "gui/$USERID/$WEB_LABEL" 2>/dev/null && echo "  Web stopped" || echo "  Web: not running"
     openclaw gateway stop 2>/dev/null && echo "  Gateway stopped" || echo "  Gateway: not running"
 }
 
