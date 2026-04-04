@@ -64,12 +64,22 @@ class OllamaProvider:
             logger.error("Ollama embed failed: %s", exc)
             raise
 
-    def chat(self, messages: list[dict[str, str]]) -> str:
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+    ) -> str:
         """Send a chat completion request to Ollama."""
         body = json.dumps({
             "model": self.chat_model,
             "messages": messages,
             "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+                "num_ctx": 8192,
+            },
         }).encode()
         req = Request(
             f"{self.base_url}/api/chat",
