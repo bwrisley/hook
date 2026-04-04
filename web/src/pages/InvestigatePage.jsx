@@ -278,7 +278,7 @@ export default function InvestigatePage() {
                 </div>
               </button>
               <div className="absolute right-2 top-3 hidden gap-1 group-hover:flex">
-                {conv.access === 'owner' && (
+                {(conv.access === 'owner' || conv.access === 'admin') && (
                   <button
                     className="text-dim hover:text-accent"
                     onClick={(e) => shareConversation(conv.conversation_id, e)}
