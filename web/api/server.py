@@ -21,14 +21,15 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from web.api.gateway_bridge import GatewayBridge
 from web.api.sse import sse_event, extract_highlights
+from web.api.auth import AuthDB, get_current_user, require_admin, COOKIE_NAME
 
 ROOT = Path(__file__).resolve().parents[2]
 DIST_DIR = ROOT / "web" / "dist"
@@ -62,6 +63,21 @@ class ChatRequest(BaseModel):
 class InvestigateRequest(BaseModel):
     message: str
     investigation_id: str | None = None
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "analyst"
+    display_name: str | None = None
+
+class UpdateUserRequest(BaseModel):
+    password: str | None = None
+    role: str | None = None
+    display_name: str | None = None
 
 
 # -- Input validation --
@@ -209,6 +225,7 @@ class WebSessionDB:
                 conversation_id TEXT PRIMARY KEY,
                 session_key TEXT,
                 investigation_id TEXT,
+                user_id TEXT,
                 created_at TEXT,
                 last_message_at TEXT,
                 title TEXT
@@ -228,11 +245,11 @@ class WebSessionDB:
         """)
         self._conn.commit()
 
-    def get_or_create(self, conversation_id: str | None = None) -> dict:
+    def get_or_create(self, conversation_id: str | None = None, user_id: str | None = None) -> dict:
         """Get existing conversation or create a new one."""
         if conversation_id:
             row = self._conn.execute(
-                "SELECT conversation_id, session_key, investigation_id FROM conversations WHERE conversation_id = ?",
+                "SELECT conversation_id, session_key, investigation_id, user_id FROM conversations WHERE conversation_id = ?",
                 (conversation_id,),
             ).fetchone()
             if row:
@@ -240,16 +257,17 @@ class WebSessionDB:
                     "conversation_id": row[0],
                     "session_key": row[1],
                     "investigation_id": row[2],
+                    "user_id": row[3],
                 }
 
         conv_id = conversation_id or str(uuid.uuid4())[:8]
         now = datetime.now(timezone.utc).isoformat()
         self._conn.execute(
-            "INSERT OR IGNORE INTO conversations (conversation_id, session_key, investigation_id, created_at, last_message_at, title) VALUES (?, ?, ?, ?, ?, ?)",
-            (conv_id, None, None, now, now, None),
+            "INSERT OR IGNORE INTO conversations (conversation_id, session_key, investigation_id, user_id, created_at, last_message_at, title) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (conv_id, None, None, user_id, now, now, None),
         )
         self._conn.commit()
-        return {"conversation_id": conv_id, "session_key": None, "investigation_id": None}
+        return {"conversation_id": conv_id, "session_key": None, "investigation_id": None, "user_id": user_id}
 
     def update_session_key(self, conversation_id: str, session_key: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -296,12 +314,19 @@ class WebSessionDB:
             for r in rows
         ]
 
-    def list_conversations(self) -> list[dict]:
-        """List all conversations ordered by most recent."""
-        rows = self._conn.execute(
-            "SELECT conversation_id, session_key, investigation_id, created_at, last_message_at, title "
-            "FROM conversations ORDER BY last_message_at DESC"
-        ).fetchall()
+    def list_conversations(self, user_id: str | None = None) -> list[dict]:
+        """List conversations, optionally filtered by user."""
+        if user_id:
+            rows = self._conn.execute(
+                "SELECT conversation_id, session_key, investigation_id, created_at, last_message_at, title "
+                "FROM conversations WHERE user_id = ? ORDER BY last_message_at DESC",
+                (user_id,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT conversation_id, session_key, investigation_id, created_at, last_message_at, title "
+                "FROM conversations ORDER BY last_message_at DESC"
+            ).fetchall()
         return [
             {
                 "conversation_id": r[0],
@@ -336,16 +361,19 @@ def create_app() -> FastAPI:
     db_path = str(DATA_DIR / "hook-web.db")
 
     tracker = AgentTracker(db_path)
+    auth_db = AuthDB(db_path)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.bridge = bridge
         app.state.web_db = WebSessionDB(db_path)
         app.state.tracker = tracker
+        app.state.auth_db = auth_db
         yield
         await bridge.close()
         app.state.web_db.close()
         tracker.close()
+        auth_db.close()
 
     app = FastAPI(title="HOOK Web API", lifespan=lifespan)
     app.add_middleware(
@@ -353,8 +381,75 @@ def create_app() -> FastAPI:
         allow_origins=["*"],
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["content-type"],
-        allow_credentials=False,
+        allow_credentials=True,
     )
+
+    # -- Auth Endpoints (no auth required) --
+
+    @app.post("/api/auth/login")
+    async def login(body: LoginRequest):
+        auth: AuthDB = app.state.auth_db
+        user = auth.authenticate(body.username, body.password)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        token = auth.create_session(body.username)
+        response = JSONResponse({"status": "ok", "user": user})
+        response.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=86400)
+        return response
+
+    @app.post("/api/auth/logout")
+    async def logout(request: Request):
+        token = request.cookies.get(COOKIE_NAME)
+        if token:
+            app.state.auth_db.delete_session(token)
+        response = JSONResponse({"status": "ok"})
+        response.delete_cookie(COOKIE_NAME)
+        return response
+
+    @app.get("/api/auth/me")
+    async def me(request: Request):
+        try:
+            user = get_current_user(request)
+            return {"status": "ok", "user": user}
+        except HTTPException:
+            return {"status": "unauthenticated", "user": None}
+
+    # -- Admin Endpoints --
+
+    @app.get("/api/admin/users")
+    async def admin_list_users(request: Request):
+        user = get_current_user(request)
+        require_admin(user)
+        return {"users": app.state.auth_db.list_users()}
+
+    @app.post("/api/admin/users")
+    async def admin_create_user(body: CreateUserRequest, request: Request):
+        user = get_current_user(request)
+        require_admin(user)
+        try:
+            new_user = app.state.auth_db.create_user(
+                body.username, body.password, role=body.role, display_name=body.display_name
+            )
+            return {"status": "ok", "user": new_user}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @app.put("/api/admin/users/{username}")
+    async def admin_update_user(username: str, body: UpdateUserRequest, request: Request):
+        user = get_current_user(request)
+        require_admin(user)
+        app.state.auth_db.update_user(username, password=body.password, role=body.role, display_name=body.display_name)
+        return {"status": "ok"}
+
+    @app.delete("/api/admin/users/{username}")
+    async def admin_delete_user(username: str, request: Request):
+        user = get_current_user(request)
+        require_admin(user)
+        try:
+            app.state.auth_db.delete_user(username)
+            return {"status": "ok"}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     # -- Endpoints --
 
@@ -413,11 +508,12 @@ def create_app() -> FastAPI:
         return {"agents": enriched, "totals": totals}
 
     @app.post("/api/chat/stream")
-    async def chat_stream(body: ChatRequest):
+    async def chat_stream(body: ChatRequest, request: Request):
+        user = get_current_user(request)
         bridge: GatewayBridge = app.state.bridge
         web_db: WebSessionDB = app.state.web_db
 
-        conv = web_db.get_or_create(body.conversation_id)
+        conv = web_db.get_or_create(body.conversation_id, user_id=user["username"])
         conversation_id = conv["conversation_id"]
         session_key = body.session_key or conv["session_key"]
 
@@ -640,9 +736,12 @@ Respond to the operator's latest message. Use the conversation context to resolv
         return {"config": {}, "error": "Config template not found"}
 
     @app.get("/api/conversations")
-    async def conversations() -> dict[str, Any]:
+    async def conversations(request: Request) -> dict[str, Any]:
+        user = get_current_user(request)
         web_db: WebSessionDB = app.state.web_db
-        return {"items": web_db.list_conversations()}
+        # Admins see all conversations, analysts see only their own
+        user_filter = None if user["role"] == "admin" else user["username"]
+        return {"items": web_db.list_conversations(user_id=user_filter)}
 
     # -- Static file serving (production SPA) --
 

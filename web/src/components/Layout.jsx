@@ -1,15 +1,25 @@
 import { NavLink } from 'react-router-dom'
-import { Activity, Bot, FileText, Rss, Settings, Shield } from 'lucide-react'
+import { Activity, Bot, FileText, LogOut, Rss, Settings, Shield, Users } from 'lucide-react'
+import { logout } from '../lib/api.js'
 
-const links = [
-  { to: '/investigate', label: 'INVESTIGATE', icon: Bot },
-  { to: '/agents', label: 'AGENTS', icon: Activity },
-  { to: '/investigations', label: 'HISTORY', icon: FileText },
-  { to: '/feeds', label: 'FEEDS', icon: Rss },
-  { to: '/settings', label: 'SETTINGS', icon: Settings },
-]
+export default function Layout({ children, user, onLogout }) {
+  const links = [
+    { to: '/investigate', label: 'INVESTIGATE', icon: Bot },
+    { to: '/agents', label: 'AGENTS', icon: Activity },
+    { to: '/investigations', label: 'HISTORY', icon: FileText },
+    { to: '/feeds', label: 'FEEDS', icon: Rss },
+    { to: '/settings', label: 'SETTINGS', icon: Settings },
+  ]
 
-export default function Layout({ children }) {
+  if (user?.role === 'admin') {
+    links.push({ to: '/admin', label: 'USERS', icon: Users })
+  }
+
+  const handleLogout = async () => {
+    await logout()
+    onLogout()
+  }
+
   return (
     <div className="flex h-full bg-shell text-text">
       <aside className="flex w-64 flex-col border-r border-border bg-panel">
@@ -44,8 +54,18 @@ export default function Layout({ children }) {
         </nav>
 
         <div className="border-t border-border p-4">
-          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
-            PUNCH Cyber // Shadowbox
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="font-mono text-xs text-text">{user?.display_name || user?.username}</div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-dim">{user?.role}</div>
+            </div>
+            <button
+              className="text-dim hover:text-danger transition"
+              onClick={handleLogout}
+              title="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         </div>
       </aside>

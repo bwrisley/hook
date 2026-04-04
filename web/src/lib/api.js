@@ -2,7 +2,22 @@ import axios from 'axios'
 
 export const api = axios.create({
   timeout: 120000,
+  withCredentials: true,
 })
+
+export async function login(username, password) {
+  const res = await api.post('/api/auth/login', { username, password })
+  return res.data
+}
+
+export async function logout() {
+  await api.post('/api/auth/logout')
+}
+
+export async function getMe() {
+  const res = await api.get('/api/auth/me')
+  return res.data
+}
 
 /**
  * Stream a chat message via SSE.
@@ -12,6 +27,7 @@ export async function streamChat({ message, conversationId, sessionKey, onEvent 
   const response = await fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify({
       message,
       conversation_id: conversationId,
