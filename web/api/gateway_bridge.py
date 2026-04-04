@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import uuid
 from typing import Any, AsyncGenerator, Optional
 
@@ -195,9 +196,13 @@ class GatewayBridge:
                 "content": f"Running {specialist}...",
             })
 
-            specialist_message = f"""{accumulated_findings}
+            # Inject RAG context (feed matches, past verdicts) if available
+            rag_context = self._get_rag_context(accumulated_findings)
+
+            specialist_message = f"""{rag_context}{accumulated_findings}
 You are the next agent in the chain. Complete your specific task based on the context above.
-Focus on your expertise. Use the findings from prior agents in the chain."""
+Focus on your expertise. Use the findings from prior agents in the chain.
+If RAG CONTEXT is provided above, incorporate it into your analysis — especially any threat feed matches."""
 
             specialist_result = await self._run_agent(specialist, specialist_message)
 
@@ -216,6 +221,44 @@ Focus on your expertise. Use the findings from prior agents in the chain."""
                 })
 
         yield sse_event("done", {"session_key": session_id})
+
+    def _query_rag(self, query: str, category: str, k: int = 3) -> str:
+        """Query RAG for context to inject into specialist messages."""
+        try:
+            hook_dir = os.environ.get("HOOK_DIR", "/Users/bww/projects/hook")
+            result = subprocess.run(
+                ["python3", f"{hook_dir}/scripts/rag-inject.py", "query", query, "--category", category, "--k", str(k)],
+                capture_output=True, text=True, timeout=15,
+                env={**os.environ, "HOOK_DIR": hook_dir},
+            )
+            output = result.stdout.strip()
+            if output and "No relevant context found" not in output:
+                return output
+        except Exception as exc:
+            logger.debug("RAG query failed: %s", exc)
+        return ""
+
+    def _get_rag_context(self, message: str) -> str:
+        """Extract IOCs from the message and check RAG for feed matches and past verdicts."""
+        import re as _re
+        contexts = []
+
+        # Find IPs in the message
+        ips = _re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', message)
+        # Find domains
+        domains = _re.findall(r'\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b', message)
+
+        for ioc in set(ips + domains):
+            feed_ctx = self._query_rag(ioc, "feed_ioc", k=2)
+            if feed_ctx:
+                contexts.append(feed_ctx)
+            verdict_ctx = self._query_rag(ioc, "ioc_verdict", k=2)
+            if verdict_ctx:
+                contexts.append(verdict_ctx)
+
+        if contexts:
+            return "RAG CONTEXT (from behavioral memory and threat feeds):\n" + "\n".join(contexts) + "\n---\n"
+        return ""
 
     async def _run_agent(
         self,
