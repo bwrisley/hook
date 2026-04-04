@@ -46,8 +46,8 @@ AGENTS = [
     {"id": "triage-analyst", "model": "openai/gpt-4.1", "role": "Tier 2 SOC analyst. Seen everything twice. Clinical, precise, no-nonsense. Calls what she sees and shows her work."},
     {"id": "osint-researcher", "model": "openai/gpt-4.1", "role": "Infrastructure intelligence analyst. Follows the thread past where most analysts stop. Methodical, thorough, quietly precise."},
     {"id": "incident-responder", "model": "openai/gpt-4.1", "role": "Federal IR lead. Contain first, understand later. Calm, precise, framework-driven. Has been in worse situations than this one."},
-    {"id": "threat-intel", "model": "openai/gpt-4.1", "role": "Intelligence analyst. IC-trained, cyber-focused. Precise, measured, patient. Confidence levels mean something here."},
-    {"id": "report-writer", "model": "openai/gpt-4.1", "role": "Intelligence writer. Translates what the team found into what the audience needs. Precise, calibrated, quietly authoritative."},
+    {"id": "threat-intel", "model": "openai/gpt-5", "role": "Intelligence analyst. IC-trained, cyber-focused. Precise, measured, patient. Confidence levels mean something here."},
+    {"id": "report-writer", "model": "openai/gpt-5", "role": "Intelligence writer. Translates what the team found into what the audience needs. Precise, calibrated, quietly authoritative."},
     {"id": "log-querier", "model": "openai/gpt-4.1", "role": "Data engineer turned log intelligence specialist. Literal, precise, technically thorough. Returns what the data shows and nothing it doesn't."},
 ]
 

@@ -63,13 +63,22 @@ def main() -> None:
     # LLM for embeddings and summarization
     llm = None
     try:
-        from tests.mocks.mock_llm import MockLLMProvider
-        llm = MockLLMProvider(embedding_dims=64)
-        logger.info("Using mock LLM provider (configure real LLM for production)")
+        from core.llm.ollama_provider import OllamaProvider, is_ollama_available
+        if is_ollama_available():
+            llm = OllamaProvider()
+            logger.info("Using Ollama (%s / %s)", llm.embed_model, llm.chat_model)
     except ImportError:
-        logger.error("No LLM provider available")
-        print(json.dumps({"status": "error", "message": "No LLM provider"}))
-        sys.exit(1)
+        pass
+
+    if llm is None:
+        try:
+            from tests.mocks.mock_llm import MockLLMProvider
+            llm = MockLLMProvider(embedding_dims=64)
+            logger.info("Ollama not available; using mock LLM")
+        except ImportError:
+            logger.error("No LLM provider available")
+            print(json.dumps({"status": "error", "message": "No LLM provider"}))
+            sys.exit(1)
 
     rag = RAGEngine(llm=llm, db=db)
     baseliner = Baseliner(db=db, llm=llm, rag=rag)

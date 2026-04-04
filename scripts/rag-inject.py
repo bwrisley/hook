@@ -68,13 +68,23 @@ def _build_rag() -> tuple[RAGEngine, BehavioralMemory]:
         except Exception as exc:
             logger.warning("OpenSearch unavailable: %s; using FAISS fallback", exc)
 
-    # Try to get an LLM for embeddings
-    # For now, use a simple deterministic embedder if no LLM configured
+    # Try Ollama for embeddings (preferred — real semantic embeddings)
     try:
-        from tests.mocks.mock_llm import MockLLMProvider
-        llm = MockLLMProvider(embedding_dims=64)
+        from core.llm.ollama_provider import OllamaProvider, is_ollama_available
+        if is_ollama_available():
+            llm = OllamaProvider()
+            logger.info("Using Ollama for embeddings (%s)", llm.embed_model)
     except ImportError:
         pass
+
+    # Fall back to mock LLM if Ollama unavailable
+    if llm is None:
+        try:
+            from tests.mocks.mock_llm import MockLLMProvider
+            llm = MockLLMProvider(embedding_dims=64)
+            logger.info("Ollama not available; using mock embeddings")
+        except ImportError:
+            pass
 
     if llm is None:
         print(json.dumps({"status": "error", "message": "No LLM provider available for embeddings"}))
