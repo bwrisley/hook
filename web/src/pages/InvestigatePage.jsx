@@ -134,6 +134,10 @@ export default function InvestigatePage() {
               const updated = prev.map((p) =>
                 p.status === 'working' ? { ...p, status: 'done', finishedAt: Date.now() } : p
               )
+              // Don't add duplicate entries for the same agent
+              if (updated.some((p) => p.agent === payload.agent && p.status === 'done')) {
+                return updated
+              }
               return [...updated, { agent: payload.agent, status: 'working', startedAt: Date.now() }]
             })
           }
