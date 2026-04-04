@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Plus, Send, Trash2, X } from 'lucide-react'
+import { Plus, Send, Share2, Trash2, X } from 'lucide-react'
 import { api, streamChat, AGENT_LABELS } from '../lib/api.js'
 import AgentBadge from '../components/AgentBadge.jsx'
 
@@ -97,6 +97,19 @@ export default function InvestigatePage() {
       await api.delete(`/api/messages/${msgId}`)
       setMessages((prev) => prev.filter((m) => m.msg_id !== msgId))
     } catch { /* ignore */ }
+  }
+
+  const shareConversation = async (convId, e) => {
+    e.stopPropagation()
+    const username = window.prompt('Share with username:')
+    if (!username) return
+    const mode = window.confirm('Allow them to send messages? (OK = collaborate, Cancel = read-only)') ? 'collaborate' : 'read'
+    try {
+      await api.post(`/api/conversations/${convId}/share`, { username, mode })
+      alert(`Shared with ${username} (${mode})`)
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to share')
+    }
   }
 
   const send = async () => {
@@ -253,17 +266,37 @@ export default function InvestigatePage() {
                 <div className="truncate font-mono text-xs text-accent pr-6">
                   {conv.title || conv.conversation_id}
                 </div>
-                <div className="mt-1 font-mono text-[10px] text-dim">
-                  {conv.last_message_at ? new Date(conv.last_message_at).toLocaleString() : ''}
+                <div className="mt-1 flex items-center gap-2">
+                  {conv.access && conv.access !== 'owner' && (
+                    <span className={`badge text-[9px] ${conv.access === 'collaborate' ? 'badge-amber' : 'badge-dim'}`}>
+                      {conv.access === 'read' ? 'shared' : conv.access === 'collaborate' ? 'collab' : conv.access}
+                    </span>
+                  )}
+                  <span className="font-mono text-[10px] text-dim">
+                    {conv.last_message_at ? new Date(conv.last_message_at).toLocaleString() : ''}
+                  </span>
                 </div>
               </button>
-              <button
-                className="absolute right-2 top-3 hidden text-dim hover:text-danger group-hover:block"
-                onClick={(e) => deleteConversation(conv.conversation_id, e)}
-                title="Delete conversation"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              <div className="absolute right-2 top-3 hidden gap-1 group-hover:flex">
+                {conv.access === 'owner' && (
+                  <button
+                    className="text-dim hover:text-accent"
+                    onClick={(e) => shareConversation(conv.conversation_id, e)}
+                    title="Share conversation"
+                  >
+                    <Share2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {(conv.access === 'owner' || conv.access === 'admin') && (
+                  <button
+                    className="text-dim hover:text-danger"
+                    onClick={(e) => deleteConversation(conv.conversation_id, e)}
+                    title="Delete conversation"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>

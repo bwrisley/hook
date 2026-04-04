@@ -79,6 +79,10 @@ class UpdateUserRequest(BaseModel):
     role: str | None = None
     display_name: str | None = None
 
+class ShareRequest(BaseModel):
+    username: str
+    mode: str = "read"  # "read" or "collaborate"
+
 
 # -- Input validation --
 
@@ -232,6 +236,18 @@ class WebSessionDB:
             )
         """)
         self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_shares (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                shared_with TEXT NOT NULL,
+                shared_by TEXT NOT NULL,
+                mode TEXT NOT NULL DEFAULT 'read',
+                shared_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id),
+                UNIQUE(conversation_id, shared_with)
+            )
+        """)
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 conversation_id TEXT NOT NULL,
@@ -315,29 +331,92 @@ class WebSessionDB:
         ]
 
     def list_conversations(self, user_id: str | None = None) -> list[dict]:
-        """List conversations, optionally filtered by user."""
+        """List conversations: owned + shared with this user."""
         if user_id:
+            # Own conversations
             rows = self._conn.execute(
-                "SELECT conversation_id, session_key, investigation_id, created_at, last_message_at, title "
+                "SELECT conversation_id, session_key, investigation_id, created_at, last_message_at, title, user_id "
                 "FROM conversations WHERE user_id = ? ORDER BY last_message_at DESC",
                 (user_id,),
             ).fetchall()
+            owned = [
+                {
+                    "conversation_id": r[0], "session_key": r[1], "investigation_id": r[2],
+                    "created_at": r[3], "last_message_at": r[4], "title": r[5],
+                    "owner": r[6], "access": "owner",
+                }
+                for r in rows
+            ]
+            # Shared with me
+            shared_rows = self._conn.execute(
+                "SELECT c.conversation_id, c.session_key, c.investigation_id, c.created_at, c.last_message_at, c.title, c.user_id, cs.mode "
+                "FROM conversations c JOIN conversation_shares cs ON c.conversation_id = cs.conversation_id "
+                "WHERE cs.shared_with = ? ORDER BY c.last_message_at DESC",
+                (user_id,),
+            ).fetchall()
+            shared = [
+                {
+                    "conversation_id": r[0], "session_key": r[1], "investigation_id": r[2],
+                    "created_at": r[3], "last_message_at": r[4], "title": r[5],
+                    "owner": r[6], "access": r[7],
+                }
+                for r in shared_rows
+            ]
+            return owned + shared
         else:
             rows = self._conn.execute(
-                "SELECT conversation_id, session_key, investigation_id, created_at, last_message_at, title "
+                "SELECT conversation_id, session_key, investigation_id, created_at, last_message_at, title, user_id "
                 "FROM conversations ORDER BY last_message_at DESC"
             ).fetchall()
-        return [
-            {
-                "conversation_id": r[0],
-                "session_key": r[1],
-                "investigation_id": r[2],
-                "created_at": r[3],
-                "last_message_at": r[4],
-                "title": r[5],
-            }
-            for r in rows
-        ]
+            return [
+                {
+                    "conversation_id": r[0], "session_key": r[1], "investigation_id": r[2],
+                    "created_at": r[3], "last_message_at": r[4], "title": r[5],
+                    "owner": r[6], "access": "admin",
+                }
+                for r in rows
+            ]
+
+    def share_conversation(self, conversation_id: str, shared_with: str, shared_by: str, mode: str = "read") -> None:
+        """Share a conversation with another user."""
+        now = datetime.now(timezone.utc).isoformat()
+        self._conn.execute(
+            "INSERT OR REPLACE INTO conversation_shares (conversation_id, shared_with, shared_by, mode, shared_at) VALUES (?, ?, ?, ?, ?)",
+            (conversation_id, shared_with, shared_by, mode, now),
+        )
+        self._conn.commit()
+
+    def unshare_conversation(self, conversation_id: str, shared_with: str) -> None:
+        """Revoke a user's access to a shared conversation."""
+        self._conn.execute(
+            "DELETE FROM conversation_shares WHERE conversation_id = ? AND shared_with = ?",
+            (conversation_id, shared_with),
+        )
+        self._conn.commit()
+
+    def get_shares(self, conversation_id: str) -> list[dict]:
+        """Get all shares for a conversation."""
+        rows = self._conn.execute(
+            "SELECT shared_with, shared_by, mode, shared_at FROM conversation_shares WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchall()
+        return [{"shared_with": r[0], "shared_by": r[1], "mode": r[2], "shared_at": r[3]} for r in rows]
+
+    def get_share_mode(self, conversation_id: str, username: str) -> str | None:
+        """Check if a user has shared access. Returns mode or None."""
+        row = self._conn.execute(
+            "SELECT mode FROM conversation_shares WHERE conversation_id = ? AND shared_with = ?",
+            (conversation_id, username),
+        ).fetchone()
+        return row[0] if row else None
+
+    def get_conversation_owner(self, conversation_id: str) -> str | None:
+        """Get the owner of a conversation."""
+        row = self._conn.execute(
+            "SELECT user_id FROM conversations WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchone()
+        return row[0] if row else None
 
     def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation and all its messages."""
@@ -517,6 +596,13 @@ def create_app() -> FastAPI:
         conversation_id = conv["conversation_id"]
         session_key = body.session_key or conv["session_key"]
 
+        # Check access: owner, collaborator, or admin can send messages
+        conv_owner = conv.get("user_id")
+        if conv_owner and conv_owner != user["username"] and user["role"] != "admin":
+            share_mode = web_db.get_share_mode(conversation_id, user["username"])
+            if share_mode != "collaborate":
+                raise HTTPException(status_code=403, detail="Read-only access to this conversation")
+
         # Persist the user message
         web_db.add_message(conversation_id, "user", body.message)
 
@@ -612,6 +698,37 @@ Respond to the operator's latest message. Use the conversation context to resolv
         web_db: WebSessionDB = app.state.web_db
         web_db.delete_message(message_id)
         return {"status": "ok"}
+
+    @app.post("/api/conversations/{conversation_id}/share")
+    async def share_conversation(conversation_id: str, body: ShareRequest, request: Request):
+        user = get_current_user(request)
+        _validate_id(conversation_id, "conversation ID")
+        web_db: WebSessionDB = app.state.web_db
+        owner = web_db.get_conversation_owner(conversation_id)
+        if owner != user["username"] and user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Only the owner can share this conversation")
+        if body.mode not in ("read", "collaborate"):
+            raise HTTPException(status_code=400, detail="Mode must be 'read' or 'collaborate'")
+        web_db.share_conversation(conversation_id, body.username, user["username"], body.mode)
+        return {"status": "ok", "shared_with": body.username, "mode": body.mode}
+
+    @app.delete("/api/conversations/{conversation_id}/share/{username}")
+    async def unshare_conversation(conversation_id: str, username: str, request: Request):
+        user = get_current_user(request)
+        _validate_id(conversation_id, "conversation ID")
+        web_db: WebSessionDB = app.state.web_db
+        owner = web_db.get_conversation_owner(conversation_id)
+        if owner != user["username"] and user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Only the owner can manage sharing")
+        web_db.unshare_conversation(conversation_id, username)
+        return {"status": "ok"}
+
+    @app.get("/api/conversations/{conversation_id}/shares")
+    async def get_shares(conversation_id: str, request: Request):
+        user = get_current_user(request)
+        _validate_id(conversation_id, "conversation ID")
+        web_db: WebSessionDB = app.state.web_db
+        return {"shares": web_db.get_shares(conversation_id)}
 
     @app.get("/api/investigations")
     async def investigations() -> dict[str, Any]:
