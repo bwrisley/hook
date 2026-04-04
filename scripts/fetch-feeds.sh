@@ -165,6 +165,19 @@ fi
 
 source_log "INFO" "Feed fetch complete: $TOTAL_NEW unique IOCs → $COMBINED"
 
+# Ingest into RAG behavioral memory
+if [ "$TOTAL_NEW" -gt 0 ] && [ -f "$HOOK_DIR/scripts/feed-to-rag.py" ]; then
+    source_log "INFO" "Ingesting feed IOCs into RAG..."
+    HOOK_DIR="$HOOK_DIR" python3 "$HOOK_DIR/scripts/feed-to-rag.py" --date "$DATE" 2>&1 | while read -r line; do
+        source_log "INFO" "RAG: $line"
+    done
+
+    # Clean up feeds older than 30 days
+    HOOK_DIR="$HOOK_DIR" python3 "$HOOK_DIR/scripts/feed-to-rag.py" --cleanup 30 2>&1 | while read -r line; do
+        source_log "INFO" "Cleanup: $line"
+    done
+fi
+
 # Output summary as JSON for piping
 python3 -c "
 import json

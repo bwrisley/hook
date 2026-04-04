@@ -352,16 +352,23 @@ All API calls must use `exec` tool, NOT `web_fetch` (Cloudflare blocks browser r
 
 ## Behavioral Memory (RAG)
 
-Before enriching an IOC, check if HOOK has seen it before:
+Before enriching an IOC, check two things:
 
+### 1. Past verdicts (have we enriched this IOC before?)
 ```bash
 exec: python3 /Users/bww/projects/hook/scripts/rag-inject.py query "45.77.65.211" --category ioc_verdict --k 3
 ```
 
-This returns past verdicts for the IOC. If a recent verdict exists with high confidence, reference it in your analysis rather than re-enriching from scratch.
+If a recent verdict exists with high confidence, reference it in your analysis rather than re-enriching from scratch.
 
-After completing enrichment, store the verdict for future recall:
+### 2. Threat feed matches (did this IOC appear in a feed?)
+```bash
+exec: python3 /Users/bww/projects/hook/scripts/rag-inject.py query "45.77.65.211" --category feed_ioc --k 3
+```
 
+If the IOC appeared in a threat feed (Feodo, URLhaus, ThreatFox), flag this prominently in your report — it means the IOC has been independently observed as malicious by external intelligence sources.
+
+### After enrichment, store the verdict:
 ```bash
 exec: python3 /Users/bww/projects/hook/scripts/rag-inject.py store-verdict --ioc "45.77.65.211" --type ip --verdict "HIGH risk, Cobalt Strike C2 beacon" --confidence high
 ```
