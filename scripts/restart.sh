@@ -36,11 +36,9 @@ status() {
 
 restart_web() {
     echo "Restarting Shadowbox web..."
-    launchctl kickstart -k "gui/$USERID/$WEB_LABEL" 2>/dev/null || {
-        # Not loaded — try bootstrap
-        lsof -ti:7799 | xargs kill -9 2>/dev/null || true
-        launchctl bootstrap "gui/$UID" ~/Library/LaunchAgents/$WEB_LABEL.plist 2>/dev/null || true
-    }
+    launchctl bootout "gui/$USERID/$WEB_LABEL" 2>/dev/null
+    sleep 1
+    launchctl bootstrap "gui/$USERID" ~/Library/LaunchAgents/$WEB_LABEL.plist 2>/dev/null || true
     sleep 2
     if curl -s http://localhost:7799/api/status > /dev/null 2>&1; then
         echo "  Web: running on port 7799"
