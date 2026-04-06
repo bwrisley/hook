@@ -95,11 +95,48 @@ for line in whois_raw.splitlines():
             whois_parsed['country'] = line.split(':', 1)[-1].strip()
 results['sources']['whois'] = whois_parsed if whois_parsed else {'error': 'parse_failed'}
 
+# AlienVault OTX
+otx_key = os.environ.get('OTX_API_KEY', '')
+if otx_key:
+    rate_limit_wait('otx')
+    otx = curl_json([
+        'https://otx.alienvault.com/api/v1/indicators/domain/' + domain + '/general',
+        '-H', 'X-OTX-API-KEY: ' + otx_key
+    ], api_name='otx')
+    if 'error' not in otx:
+        pulses = otx.get('pulse_info', {})
+        pulse_count = pulses.get('count', 0)
+        pulse_names = [p.get('name', '') for p in pulses.get('pulses', [])[:5]]
+        pulse_tags = []
+        for p in pulses.get('pulses', [])[:10]:
+            pulse_tags.extend(p.get('tags', []))
+        pulse_tags = list(set(pulse_tags))[:10]
+        attack_ids = []
+        for p in pulses.get('pulses', [])[:10]:
+            for ind in p.get('attack_ids', []):
+                if isinstance(ind, dict):
+                    attack_ids.append(ind.get('id', ''))
+                elif isinstance(ind, str):
+                    attack_ids.append(ind)
+        attack_ids = list(set(attack_ids))[:10]
+        results['sources']['otx'] = {
+            'pulse_count': pulse_count,
+            'pulse_names': pulse_names,
+            'tags': pulse_tags,
+            'attack_ids': attack_ids,
+        }
+    else:
+        results['sources']['otx'] = otx
+        log_warn(SCRIPT, f'OTX lookup failed for {domain}', otx)
+else:
+    results['sources']['otx'] = {'error': 'no_api_key'}
+
 # Risk assessment
 vt_mal = results['sources'].get('virustotal', {}).get('malicious', 0)
-if vt_mal > 5:
+otx_pulses = results['sources'].get('otx', {}).get('pulse_count', 0)
+if vt_mal > 5 or otx_pulses > 10:
     results['risk'] = 'HIGH'
-elif vt_mal > 0:
+elif vt_mal > 0 or otx_pulses > 3:
     results['risk'] = 'MEDIUM'
 else:
     results['risk'] = 'LOW'

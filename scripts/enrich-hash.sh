@@ -80,14 +80,43 @@ if vt_key:
 else:
     results['sources']['virustotal'] = {'error': 'no_api_key'}
 
+# AlienVault OTX
+otx_key = os.environ.get('OTX_API_KEY', '')
+if otx_key:
+    rate_limit_wait('otx')
+    hash_type = 'FileHash-SHA256' if len(file_hash) == 64 else 'FileHash-MD5' if len(file_hash) == 32 else 'FileHash-SHA1'
+    otx = curl_json([
+        'https://otx.alienvault.com/api/v1/indicators/file/' + file_hash + '/general',
+        '-H', 'X-OTX-API-KEY: ' + otx_key
+    ], api_name='otx')
+    if 'error' not in otx:
+        pulses = otx.get('pulse_info', {})
+        pulse_count = pulses.get('count', 0)
+        pulse_names = [p.get('name', '') for p in pulses.get('pulses', [])[:5]]
+        pulse_tags = []
+        for p in pulses.get('pulses', [])[:10]:
+            pulse_tags.extend(p.get('tags', []))
+        pulse_tags = list(set(pulse_tags))[:10]
+        results['sources']['otx'] = {
+            'pulse_count': pulse_count,
+            'pulse_names': pulse_names,
+            'tags': pulse_tags,
+        }
+    else:
+        results['sources']['otx'] = otx
+        log_warn(SCRIPT, f'OTX lookup failed for {file_hash[:16]}', otx)
+else:
+    results['sources']['otx'] = {'error': 'no_api_key'}
+
 # Risk assessment
 vt_data = results['sources'].get('virustotal', {})
 vt_mal = vt_data.get('malicious', 0)
+otx_pulses = results['sources'].get('otx', {}).get('pulse_count', 0)
 if not vt_data.get('found', True):
     results['risk'] = 'UNKNOWN'
-elif vt_mal > 10:
+elif vt_mal > 10 or otx_pulses > 5:
     results['risk'] = 'HIGH'
-elif vt_mal > 0:
+elif vt_mal > 0 or otx_pulses > 0:
     results['risk'] = 'MEDIUM'
 else:
     results['risk'] = 'LOW'

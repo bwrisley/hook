@@ -237,6 +237,7 @@ API_RATE_LIMITS = {
     'virustotal': int(os.environ.get('HOOK_VT_RATE_LIMIT', '4')),
     'abuseipdb': int(os.environ.get('HOOK_ABUSE_RATE_LIMIT', '15')),
     'censys': int(os.environ.get('HOOK_CENSYS_RATE_LIMIT', '4')),
+    'otx': int(os.environ.get('HOOK_OTX_RATE_LIMIT', '10')),
 }
 
 def rate_limit_wait(api_name):

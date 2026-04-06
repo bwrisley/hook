@@ -120,6 +120,45 @@ if censys_id and censys_secret:
 else:
     results['sources']['censys'] = {'error': 'no_api_key'}
 
+# AlienVault OTX
+otx_key = os.environ.get('OTX_API_KEY', '')
+if otx_key:
+    rate_limit_wait('otx')
+    otx = curl_json([
+        'https://otx.alienvault.com/api/v1/indicators/IPv4/' + ip + '/general',
+        '-H', 'X-OTX-API-KEY: ' + otx_key
+    ], api_name='otx')
+    if 'error' not in otx:
+        pulses = otx.get('pulse_info', {})
+        pulse_count = pulses.get('count', 0)
+        pulse_names = [p.get('name', '') for p in pulses.get('pulses', [])[:5]]
+        pulse_tags = []
+        for p in pulses.get('pulses', [])[:10]:
+            pulse_tags.extend(p.get('tags', []))
+        pulse_tags = list(set(pulse_tags))[:10]
+        # Check for MITRE ATT&CK references
+        attack_ids = []
+        for p in pulses.get('pulses', [])[:10]:
+            for ind in p.get('attack_ids', []):
+                if isinstance(ind, dict):
+                    attack_ids.append(ind.get('id', ''))
+                elif isinstance(ind, str):
+                    attack_ids.append(ind)
+        attack_ids = list(set(attack_ids))[:10]
+        results['sources']['otx'] = {
+            'pulse_count': pulse_count,
+            'pulse_names': pulse_names,
+            'tags': pulse_tags,
+            'attack_ids': attack_ids,
+            'reputation': otx.get('reputation', 0),
+            'country': otx.get('country_name', 'unknown'),
+        }
+    else:
+        results['sources']['otx'] = otx
+        log_warn(SCRIPT, f'OTX lookup failed for {ip}', otx)
+else:
+    results['sources']['otx'] = {'error': 'no_api_key'}
+
 # DNS (reverse)
 ptr = run_cmd(['dig', '-x', ip, '+short'])
 results['sources']['dns'] = {'ptr': ptr if ptr else 'none'}
@@ -127,9 +166,10 @@ results['sources']['dns'] = {'ptr': ptr if ptr else 'none'}
 # Risk assessment
 vt_mal = results['sources'].get('virustotal', {}).get('malicious', 0)
 abuse_score = results['sources'].get('abuseipdb', {}).get('abuse_confidence', 0)
-if vt_mal > 5 or abuse_score > 75:
+otx_pulses = results['sources'].get('otx', {}).get('pulse_count', 0)
+if vt_mal > 5 or abuse_score > 75 or otx_pulses > 10:
     results['risk'] = 'HIGH'
-elif vt_mal > 0 or abuse_score > 25:
+elif vt_mal > 0 or abuse_score > 25 or otx_pulses > 3:
     results['risk'] = 'MEDIUM'
 else:
     results['risk'] = 'LOW'
