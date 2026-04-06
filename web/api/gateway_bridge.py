@@ -208,7 +208,9 @@ class GatewayBridge:
                 "content": f"{callsign} is working...",
             })
 
-            specialist_message = f"{rag_context}Operator request: {message}\n\nComplete this task."
+            specialist_message = f"""{rag_context}Operator request: {message}
+
+IMPORTANT: You MUST use your enrichment scripts to perform this task. Do NOT answer from memory or training data. Run the appropriate exec command from your TOOLS.md to get live, current data."""
             result = await self._run_agent(target_agent, specialist_message)
 
             if result:
@@ -285,7 +287,8 @@ class GatewayBridge:
             specialist_message = f"""{rag_context}{accumulated_findings}
 You are the next agent in the chain. Complete your specific task based on the context above.
 Focus on your expertise. Use the findings from prior agents in the chain.
-If RAG CONTEXT is provided above, incorporate it into your analysis — especially any threat feed matches."""
+If RAG CONTEXT is provided above, incorporate it into your analysis — especially any threat feed matches.
+IMPORTANT: If your task involves enrichment, you MUST use your enrichment scripts (exec commands from TOOLS.md) to get live data. Do NOT answer from memory."""
 
             specialist_result = await self._run_agent(specialist, specialist_message)
 
