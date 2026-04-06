@@ -21,6 +21,25 @@ logger = logging.getLogger(__name__)
 
 AGENT_TIMEOUT = 180  # seconds
 
+def _load_env_file() -> dict[str, str]:
+    """Load API keys from .env file if not already in environment."""
+    env_extra = {}
+    hook_dir = os.environ.get("HOOK_DIR", "/Users/bww/projects/hook")
+    env_file = os.path.join(hook_dir, ".env")
+    if os.path.isfile(env_file):
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    key = key.strip()
+                    val = val.strip()
+                    if val and not os.environ.get(key):
+                        env_extra[key] = val
+    return env_extra
+
+_ENV_EXTRA = _load_env_file()
+
 SPECIALIST_AGENTS = {
     "triage-analyst", "osint-researcher", "incident-responder",
     "threat-intel", "report-writer", "log-querier",
@@ -294,7 +313,7 @@ If RAG CONTEXT is provided above, incorporate it into your analysis — especial
                 "python3", f"{hook_dir}/scripts/rag-inject.py", "query", query, "--category", category, "--k", str(k),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "HOOK_DIR": hook_dir},
+                env={**os.environ, **_ENV_EXTRA, "HOOK_DIR": hook_dir},
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
             output = stdout.decode().strip()
@@ -352,6 +371,7 @@ If RAG CONTEXT is provided above, incorporate it into your analysis — especial
                 stderr=asyncio.subprocess.PIPE,
                 env={
                     **os.environ,
+                    **_ENV_EXTRA,
                     "NO_COLOR": "1",
                     "HOOK_DIR": os.environ.get("HOOK_DIR", "/Users/bww/projects/hook"),
                 },
