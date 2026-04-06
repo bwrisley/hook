@@ -962,6 +962,76 @@ Respond to the operator's latest message. Use the conversation context to resolv
 
         return {**state, "findings_detail": findings_detail}
 
+    @app.put("/api/investigations/{inv_id}/status")
+    async def update_investigation_status(inv_id: str, request: Request):
+        _validate_id(inv_id, "investigation ID")
+        body = await request.json()
+        new_status = body.get("status")
+        disposition = body.get("disposition")
+
+        inv_dir = INVESTIGATIONS_DIR / inv_id
+        state_file = inv_dir / "state.json"
+        if not inv_dir.resolve().is_relative_to(INVESTIGATIONS_DIR.resolve()):
+            raise HTTPException(status_code=403, detail="Access denied")
+        if not state_file.exists():
+            raise HTTPException(status_code=404, detail="Investigation not found")
+
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+        now = datetime.now(timezone.utc).isoformat()
+
+        if new_status:
+            state["status"] = new_status
+            state["timeline"].append({
+                "timestamp": now,
+                "event": f"Status changed to {new_status}",
+                "agent": "operator",
+            })
+        if disposition:
+            state["disposition"] = disposition
+            state["timeline"].append({
+                "timestamp": now,
+                "event": f"Disposition set to {disposition}",
+                "agent": "operator",
+            })
+        state["updated_at"] = now
+        state_file.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+        return {"status": "ok"}
+
+    @app.post("/api/investigations/{inv_id}/notes")
+    async def add_investigation_note(inv_id: str, request: Request):
+        _validate_id(inv_id, "investigation ID")
+        body = await request.json()
+        note_text = body.get("note", "").strip()
+        if not note_text:
+            raise HTTPException(status_code=400, detail="Note cannot be empty")
+
+        inv_dir = INVESTIGATIONS_DIR / inv_id
+        state_file = inv_dir / "state.json"
+        if not inv_dir.resolve().is_relative_to(INVESTIGATIONS_DIR.resolve()):
+            raise HTTPException(status_code=403, detail="Access denied")
+        if not state_file.exists():
+            raise HTTPException(status_code=404, detail="Investigation not found")
+
+        user = get_current_user(request)
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+        now = datetime.now(timezone.utc).isoformat()
+
+        if "notes" not in state:
+            state["notes"] = []
+        state["notes"].append({
+            "text": note_text,
+            "author": user.get("display_name", user["username"]),
+            "timestamp": now,
+        })
+        state["timeline"].append({
+            "timestamp": now,
+            "event": f"Note added by {user.get('display_name', user['username'])}",
+            "agent": "operator",
+        })
+        state["updated_at"] = now
+        state_file.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+        return {"status": "ok"}
+
     @app.post("/api/investigate")
     async def investigate(body: InvestigateRequest):
         """Start a new investigation. Creates investigation context then streams."""
