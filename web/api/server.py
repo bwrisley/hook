@@ -569,12 +569,32 @@ def create_app() -> FastAPI:
         except Exception:
             checks["ollama"] = {"status": "unreachable", "models": []}
 
-        # API keys (check if set, not the values)
+        # API keys — check env vars, .env file, and openclaw config
+        def _key_exists(name):
+            if os.environ.get(name):
+                return True
+            # Check .env file
+            env_file = ROOT / ".env"
+            if env_file.exists():
+                for line in env_file.read_text().splitlines():
+                    if line.startswith(f"{name}=") and len(line.split("=", 1)[1].strip()) > 0:
+                        return True
+            # Check openclaw config
+            oc_config = Path.home() / ".openclaw" / "openclaw.json"
+            if oc_config.exists():
+                try:
+                    oc = json.loads(oc_config.read_text())
+                    if oc.get("env", {}).get(name):
+                        return True
+                except Exception:
+                    pass
+            return False
+
         env_keys = {
-            "OPENAI_API_KEY": bool(os.environ.get("OPENAI_API_KEY")),
-            "VT_API_KEY": bool(os.environ.get("VT_API_KEY")),
-            "CENSYS_API_ID": bool(os.environ.get("CENSYS_API_ID")),
-            "ABUSEIPDB_API_KEY": bool(os.environ.get("ABUSEIPDB_API_KEY")),
+            "OPENAI_API_KEY": _key_exists("OPENAI_API_KEY"),
+            "VT_API_KEY": _key_exists("VT_API_KEY"),
+            "CENSYS_API_ID": _key_exists("CENSYS_API_ID"),
+            "ABUSEIPDB_API_KEY": _key_exists("ABUSEIPDB_API_KEY"),
         }
         checks["api_keys"] = env_keys
 
