@@ -27,6 +27,34 @@ SPECIALIST_AGENTS = {
     "threat-intel", "report-writer", "log-querier",
 }
 
+# Callsign mapping for user-facing messages
+CALLSIGNS = {
+    "coordinator": "Marshall", "triage-analyst": "Tara",
+    "osint-researcher": "Hunter", "incident-responder": "Ward",
+    "threat-intel": "Driver", "report-writer": "Page", "log-querier": "Wells",
+}
+
+# Patterns for fast-routing (bypass Marshall)
+FAST_ROUTE_PATTERNS = [
+    (r"^enrich\s+(ip\s+)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", "osint-researcher", "enrichment"),
+    (r"^enrich\s+(domain\s+)?([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", "osint-researcher", "enrichment"),
+    (r"^enrich\s+(hash\s+)?([a-fA-F0-9]{32,64})", "osint-researcher", "enrichment"),
+    (r"^triage\s+", "triage-analyst", "triage"),
+    (r"^(what agents|list agents|show agents)", "coordinator", None),
+]
+
+
+def _fast_route(message: str) -> tuple[str, str] | None:
+    """Check if a message can be fast-routed directly to a specialist.
+
+    Returns (agent_id, route_type) or None if Marshall should route.
+    """
+    lower = message.strip().lower()
+    for pattern, agent, route_type in FAST_ROUTE_PATTERNS:
+        if re.match(pattern, lower):
+            return (agent, route_type)
+    return None
+
 # Map common references to agent IDs
 AGENT_ALIASES = {
     "triage": "triage-analyst",
@@ -132,6 +160,7 @@ class GatewayBridge:
     ) -> AsyncGenerator[str, None]:
         """Send a message to an agent and yield SSE events.
 
+        Fast-routes simple queries directly to specialists.
         Detects multi-agent chains and runs each specialist sequentially.
         """
         session_id = session_key or str(uuid.uuid4())[:12]
@@ -140,6 +169,42 @@ class GatewayBridge:
             "session_key": session_id,
             "agent_id": agent_id,
         })
+
+        # Check for fast-route (bypass Marshall for simple queries)
+        fast = _fast_route(message) if agent_id == "coordinator" else None
+
+        if fast and fast[1]:  # fast[1] is route_type, None means let Marshall handle
+            target_agent, route_type = fast
+            callsign = CALLSIGNS.get(target_agent, target_agent)
+
+            yield sse_event("coordinator", {
+                "agent": "coordinator",
+                "content": f"Direct {route_type} request detected — routing straight to {callsign}, skipping the full coordinator turn.",
+            })
+
+            # Inject RAG context
+            rag_context = self._get_rag_context(message)
+
+            yield sse_event("agent_start", {
+                "agent": target_agent,
+                "content": f"{callsign} is working...",
+            })
+
+            specialist_message = f"{rag_context}Operator request: {message}\n\nComplete this task."
+            result = await self._run_agent(target_agent, specialist_message)
+
+            if result:
+                yield sse_event("agent_result", {
+                    "agent": target_agent,
+                    "content": result["text"],
+                    "highlights": extract_highlights(result["text"]),
+                    "meta": result["meta"],
+                })
+            else:
+                yield sse_event("error", {"message": f"{callsign} did not return results"})
+
+            yield sse_event("done", {"session_key": session_id})
+            return
 
         yield sse_event("agent_start", {
             "agent": agent_id,

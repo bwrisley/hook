@@ -6,6 +6,18 @@ import { Plus, Send, Share2, Trash2, X } from 'lucide-react'
 import { api, streamChat, AGENT_LABELS } from '../lib/api.js'
 import AgentBadge from '../components/AgentBadge.jsx'
 
+function ElapsedTimer({ startTime }) {
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    if (!startTime) return
+    const interval = setInterval(() => {
+      setElapsed(Math.round((Date.now() - startTime) / 1000))
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [startTime])
+  return <span className="font-mono text-[11px] text-dim">{elapsed}s</span>
+}
+
 export default function InvestigatePage() {
   const { conversationId } = useParams()
   const navigate = useNavigate()
@@ -315,6 +327,7 @@ export default function InvestigatePage() {
                   <span /><span /><span />
                 </span>
               </span>
+              <ElapsedTimer startTime={chainProgress.find((p) => p.status === 'working')?.startedAt} />
             </div>
           )}
         </div>
@@ -387,7 +400,8 @@ export default function InvestigatePage() {
                           )}
                           {step.status === 'done' && <span>&#10003;</span>}
                           {label}
-                          {duration && <span className="text-dim ml-1">{duration}</span>}
+                          {step.status === 'working' && <ElapsedTimer startTime={step.startedAt} />}
+                          {step.status === 'done' && duration && <span className="text-dim ml-1">{duration}</span>}
                         </span>
                       </div>
                     )
