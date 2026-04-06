@@ -32,6 +32,7 @@ export default function InvestigatePage() {
   const inputRef = useRef(null)
   const isStreamingRef = useRef(false)
   const sessionKeyRef = useRef(null)
+  const conversationIdRef = useRef(activeId)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -70,7 +71,9 @@ export default function InvestigatePage() {
   useEffect(() => { loadConversations(true) }, [])
 
   useEffect(() => {
-    if (!isStreamingRef.current) {
+    // Don't reload messages if we're actively streaming — the messages
+    // are being built live in state and a reload would wipe them
+    if (!isStreamingRef.current && !busy) {
       loadMessages(activeId)
     }
   }, [activeId])
@@ -144,8 +147,12 @@ export default function InvestigatePage() {
         sessionKey: sessionKeyRef.current,
         onEvent: (event, payload) => {
           if (event === 'meta') {
-            if (payload.conversation_id && !activeId) {
-              navigate(`/investigate/${payload.conversation_id}`, { replace: true })
+            if (payload.conversation_id) {
+              conversationIdRef.current = payload.conversation_id
+              if (!activeId) {
+                navigate(`/investigate/${payload.conversation_id}`, { replace: true })
+                loadConversations()
+              }
             }
             if (payload.session_key) {
               sessionKeyRef.current = payload.session_key
