@@ -238,6 +238,7 @@ API_RATE_LIMITS = {
     'abuseipdb': int(os.environ.get('HOOK_ABUSE_RATE_LIMIT', '15')),
     'censys': int(os.environ.get('HOOK_CENSYS_RATE_LIMIT', '4')),
     'otx': int(os.environ.get('HOOK_OTX_RATE_LIMIT', '10')),
+    'shodan': int(os.environ.get('HOOK_SHODAN_RATE_LIMIT', '1')),  # Free tier: 1 req/sec
 }
 
 def rate_limit_wait(api_name):

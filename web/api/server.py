@@ -605,6 +605,7 @@ def create_app() -> FastAPI:
             "CENSYS_API_ID": _key_exists("CENSYS_API_ID"),
             "ABUSEIPDB_API_KEY": _key_exists("ABUSEIPDB_API_KEY"),
             "OTX_API_KEY": _key_exists("OTX_API_KEY"),
+            "SHODAN_API_KEY": _key_exists("SHODAN_API_KEY"),
         }
         checks["api_keys"] = env_keys
 

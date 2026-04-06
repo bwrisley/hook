@@ -12,6 +12,7 @@ API keys are available as shell environment variables:
 - `$CENSYS_API_SECRET` — Censys API Secret
 - `$ABUSEIPDB_API_KEY` — AbuseIPDB
 - `$OTX_API_KEY` — AlienVault OTX (community threat intel pulses, MITRE ATT&CK linkage)
+- `$SHODAN_API_KEY` — Shodan (internet-wide scanning: open ports, services, banners, CVEs)
 
 ---
 

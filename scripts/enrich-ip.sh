@@ -159,6 +159,41 @@ if otx_key:
 else:
     results['sources']['otx'] = {'error': 'no_api_key'}
 
+# Shodan
+shodan_key = os.environ.get('SHODAN_API_KEY', '')
+if shodan_key:
+    rate_limit_wait('shodan')
+    shodan = curl_json([
+        'https://api.shodan.io/shodan/host/' + ip + '?key=' + shodan_key
+    ], api_name='shodan')
+    if 'error' not in shodan:
+        ports = shodan.get('ports', [])
+        vulns = shodan.get('vulns', [])
+        services = []
+        for svc in shodan.get('data', [])[:10]:
+            services.append({
+                'port': svc.get('port', 0),
+                'transport': svc.get('transport', 'tcp'),
+                'product': svc.get('product', ''),
+                'version': svc.get('version', ''),
+                'module': svc.get('_shodan', {}).get('module', ''),
+            })
+        results['sources']['shodan'] = {
+            'ports': ports,
+            'vulns': vulns[:10],
+            'services': services,
+            'os': shodan.get('os', 'unknown'),
+            'org': shodan.get('org', 'unknown'),
+            'isp': shodan.get('isp', 'unknown'),
+            'hostnames': shodan.get('hostnames', []),
+            'last_update': shodan.get('last_update', ''),
+        }
+    else:
+        results['sources']['shodan'] = shodan
+        log_warn(SCRIPT, f'Shodan lookup failed for {ip}', shodan)
+else:
+    results['sources']['shodan'] = {'error': 'no_api_key'}
+
 # DNS (reverse)
 ptr = run_cmd(['dig', '-x', ip, '+short'])
 results['sources']['dns'] = {'ptr': ptr if ptr else 'none'}
@@ -167,9 +202,10 @@ results['sources']['dns'] = {'ptr': ptr if ptr else 'none'}
 vt_mal = results['sources'].get('virustotal', {}).get('malicious', 0)
 abuse_score = results['sources'].get('abuseipdb', {}).get('abuse_confidence', 0)
 otx_pulses = results['sources'].get('otx', {}).get('pulse_count', 0)
-if vt_mal > 5 or abuse_score > 75 or otx_pulses > 10:
+shodan_vulns = len(results['sources'].get('shodan', {}).get('vulns', []))
+if vt_mal > 5 or abuse_score > 75 or otx_pulses > 10 or shodan_vulns > 3:
     results['risk'] = 'HIGH'
-elif vt_mal > 0 or abuse_score > 25 or otx_pulses > 3:
+elif vt_mal > 0 or abuse_score > 25 or otx_pulses > 3 or shodan_vulns > 0:
     results['risk'] = 'MEDIUM'
 else:
     results['risk'] = 'LOW'
