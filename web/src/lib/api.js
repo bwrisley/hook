@@ -36,6 +36,10 @@ export async function streamChat({ message, conversationId, sessionKey, onEvent 
   })
 
   if (!response.ok || !response.body) {
+    if (response.status === 401) {
+      window.location.reload()
+      return
+    }
     throw new Error(`Chat stream failed (${response.status})`)
   }
 

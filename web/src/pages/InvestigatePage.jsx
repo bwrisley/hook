@@ -81,13 +81,14 @@ export default function InvestigatePage() {
   const newChat = () => {
     setMessages([])
     setInput('')
+    setBusy(false)
     setActiveAgent(null)
     setChainProgress([])
     sessionKeyRef.current = null
-    if (activeId) {
-      navigate('/investigate')
-    }
-    setTimeout(() => inputRef.current?.focus(), 50)
+    conversationIdRef.current = null
+    isStreamingRef.current = false
+    navigate('/investigate')
+    setTimeout(() => inputRef.current?.focus(), 100)
   }
 
   const deleteConversation = async (convId, e) => {

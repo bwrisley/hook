@@ -457,9 +457,9 @@ def create_app() -> FastAPI:
     app = FastAPI(title="HOOK Web API", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?",
         allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["content-type"],
+        allow_headers=["content-type", "authorization"],
         allow_credentials=True,
     )
 
