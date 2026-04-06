@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { Activity, Bot, ClipboardList, FileText, LogOut, Rss, Settings, Shield, Users } from 'lucide-react'
 import { logout } from '../lib/api.js'
+import NotificationBell from './NotificationBell.jsx'
 
 export default function Layout({ children, user, onLogout }) {
   const links = [
@@ -76,7 +77,10 @@ export default function Layout({ children, user, onLogout }) {
           <div className="font-mono text-xs uppercase tracking-[0.22em] text-dim">
             SOC Operations Console
           </div>
-          <div className="badge badge-accent">online</div>
+          <div className="flex items-center gap-4">
+            <NotificationBell />
+            <div className="badge badge-accent">online</div>
+          </div>
         </header>
         <div className="min-h-0 flex-1 overflow-auto p-6">{children}</div>
       </div>

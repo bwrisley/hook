@@ -30,6 +30,7 @@ from pydantic import BaseModel
 from web.api.gateway_bridge import GatewayBridge
 from web.api.sse import sse_event, extract_highlights
 from web.api.auth import AuthDB, get_current_user, require_admin, COOKIE_NAME
+from web.api.watchlist import WatchlistDB
 
 ROOT = Path(__file__).resolve().parents[2]
 DIST_DIR = ROOT / "web" / "dist"
@@ -83,6 +84,11 @@ class UpdateUserRequest(BaseModel):
 class ShareRequest(BaseModel):
     username: str
     mode: str = "read"  # "read" or "collaborate"
+
+class WatchRequest(BaseModel):
+    ioc_value: str
+    ioc_type: str = "ip"  # ip, domain, hash
+    risk: str = "UNKNOWN"
 
 
 # -- Input validation --
@@ -442,6 +448,7 @@ def create_app() -> FastAPI:
 
     tracker = AgentTracker(db_path)
     auth_db = AuthDB(db_path)
+    watchlist_db = WatchlistDB(db_path)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -449,11 +456,13 @@ def create_app() -> FastAPI:
         app.state.web_db = WebSessionDB(db_path)
         app.state.tracker = tracker
         app.state.auth_db = auth_db
+        app.state.watchlist = watchlist_db
         yield
         await bridge.close()
         app.state.web_db.close()
         tracker.close()
         auth_db.close()
+        watchlist_db.close()
 
     app = FastAPI(title="HOOK Web API", lifespan=lifespan)
     app.add_middleware(
@@ -851,6 +860,58 @@ Respond to the operator's latest message. Use the conversation context to resolv
         _validate_id(conversation_id, "conversation ID")
         web_db: WebSessionDB = app.state.web_db
         return {"shares": web_db.get_shares(conversation_id)}
+
+    # -- Watchlist & Notifications --
+
+    @app.get("/api/watchlist")
+    async def list_watchlist(request: Request):
+        user = get_current_user(request)
+        wl: WatchlistDB = app.state.watchlist
+        items = wl.list_watched(user_id=user["username"])
+        return {"items": items}
+
+    @app.post("/api/watchlist")
+    async def add_to_watchlist(body: WatchRequest, request: Request):
+        user = get_current_user(request)
+        wl: WatchlistDB = app.state.watchlist
+        result = wl.watch(body.ioc_value, body.ioc_type, user["username"], body.risk)
+        return result
+
+    @app.delete("/api/watchlist/{ioc_value}")
+    async def remove_from_watchlist(ioc_value: str, request: Request):
+        user = get_current_user(request)
+        wl: WatchlistDB = app.state.watchlist
+        wl.unwatch(ioc_value, user["username"])
+        return {"status": "ok"}
+
+    @app.get("/api/watchlist/{ioc_value}/history")
+    async def watch_history(ioc_value: str, request: Request):
+        user = get_current_user(request)
+        wl: WatchlistDB = app.state.watchlist
+        return {"history": wl.get_history(ioc_value)}
+
+    @app.get("/api/notifications")
+    async def get_notifications(request: Request):
+        user = get_current_user(request)
+        wl: WatchlistDB = app.state.watchlist
+        return {
+            "items": wl.get_notifications(user["username"]),
+            "unread": wl.unread_count(user["username"]),
+        }
+
+    @app.post("/api/notifications/{notification_id}/read")
+    async def mark_notification_read(notification_id: int, request: Request):
+        user = get_current_user(request)
+        wl: WatchlistDB = app.state.watchlist
+        wl.mark_read(notification_id, user["username"])
+        return {"status": "ok"}
+
+    @app.post("/api/notifications/read-all")
+    async def mark_all_notifications_read(request: Request):
+        user = get_current_user(request)
+        wl: WatchlistDB = app.state.watchlist
+        wl.mark_all_read(user["username"])
+        return {"status": "ok"}
 
     @app.get("/api/investigations")
     async def investigations() -> dict[str, Any]:
