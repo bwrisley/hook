@@ -59,6 +59,7 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None
     session_key: str | None = None
+    agent: str | None = None  # Direct agent routing (bypass Marshall)
 
 class InvestigateRequest(BaseModel):
     message: str
@@ -547,6 +548,106 @@ def create_app() -> FastAPI:
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
+    @app.get("/api/health")
+    async def health() -> dict[str, Any]:
+        """Comprehensive health check for all services."""
+        import subprocess as _sp
+
+        checks = {}
+
+        # Gateway
+        gw = await app.state.bridge.health_check()
+        checks["gateway"] = {"status": gw.get("status", "unknown"), "port": 18789}
+
+        # Ollama
+        try:
+            from urllib.request import urlopen
+            with urlopen("http://localhost:11434/api/tags", timeout=3) as resp:
+                data = json.loads(resp.read())
+                models = [m["name"] for m in data.get("models", [])]
+                checks["ollama"] = {"status": "ok", "models": models}
+        except Exception:
+            checks["ollama"] = {"status": "unreachable", "models": []}
+
+        # API keys (check if set, not the values)
+        env_keys = {
+            "OPENAI_API_KEY": bool(os.environ.get("OPENAI_API_KEY")),
+            "VT_API_KEY": bool(os.environ.get("VT_API_KEY")),
+            "CENSYS_API_ID": bool(os.environ.get("CENSYS_API_ID")),
+            "ABUSEIPDB_API_KEY": bool(os.environ.get("ABUSEIPDB_API_KEY")),
+        }
+        checks["api_keys"] = env_keys
+
+        # Feed freshness
+        feed_dir = DATA_DIR / "feeds"
+        latest_feed = None
+        if feed_dir.exists():
+            feeds = sorted(feed_dir.glob("combined-*.txt"), reverse=True)
+            if feeds:
+                latest_feed = feeds[0].name
+        checks["feeds"] = {"latest": latest_feed, "directory": str(feed_dir)}
+
+        # RAG vector store
+        faiss_dir = ROOT / "data" / "faiss"
+        faiss_meta = faiss_dir / "hook-vectors.json"
+        rag_count = 0
+        if faiss_meta.exists():
+            try:
+                meta = json.loads(faiss_meta.read_text())
+                rag_count = len(meta.get("id_to_pos", {}))
+            except Exception:
+                pass
+        checks["rag"] = {"vectors": rag_count, "backend": "faiss" if faiss_meta.exists() else "none"}
+
+        # Database
+        web_db: WebSessionDB = app.state.web_db
+        try:
+            conv_count = len(web_db.list_conversations())
+            msg_count = web_db._conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            user_count = app.state.auth_db._conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            checks["database"] = {"status": "ok", "conversations": conv_count, "messages": msg_count, "users": user_count}
+        except Exception as exc:
+            checks["database"] = {"status": "error", "error": str(exc)}
+
+        # Token usage totals
+        checks["usage"] = app.state.tracker.get_totals()
+
+        # Overall
+        all_ok = checks["gateway"]["status"] == "ok" and checks["database"]["status"] == "ok"
+        return {
+            "status": "healthy" if all_ok else "degraded",
+            "checks": checks,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @app.get("/api/audit")
+    async def audit_log(request: Request) -> dict[str, Any]:
+        """Return audit log of all agent calls with user, cost, and timing."""
+        user = get_current_user(request)
+        require_admin(user)
+        tracker: AgentTracker = app.state.tracker
+        rows = tracker._conn.execute(
+            "SELECT agent, model, tokens_in, tokens_out, tokens_total, duration_ms, cost_usd, conversation_id, timestamp "
+            "FROM token_usage ORDER BY timestamp DESC LIMIT 200"
+        ).fetchall()
+        entries = [
+            {
+                "agent": r[0], "model": r[1], "tokens_in": r[2], "tokens_out": r[3],
+                "tokens_total": r[4], "duration_ms": r[5], "cost_usd": round(r[6] or 0, 4),
+                "conversation_id": r[7], "timestamp": r[8],
+            }
+            for r in rows
+        ]
+        # Get conversation owners for audit context
+        web_db: WebSessionDB = app.state.web_db
+        for entry in entries:
+            if entry["conversation_id"]:
+                owner = web_db.get_conversation_owner(entry["conversation_id"])
+                entry["user"] = owner
+            else:
+                entry["user"] = None
+        return {"entries": entries, "totals": tracker.get_totals()}
+
     @app.get("/api/agents")
     async def agents() -> dict[str, Any]:
         web_db: WebSessionDB = app.state.web_db
@@ -642,7 +743,8 @@ Respond to the operator's latest message. Use the conversation context to resolv
             yield sse_event("meta", {"conversation_id": conversation_id})
 
             new_session_key = None
-            async for raw_event in bridge.send_message(message_with_context, session_key=session_key):
+            agent_id = body.agent or "coordinator"
+            async for raw_event in bridge.send_message(message_with_context, session_key=session_key, agent_id=agent_id):
                 yield raw_event
 
                 # Parse the SSE event to extract type and data

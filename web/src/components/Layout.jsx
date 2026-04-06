@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Activity, Bot, FileText, LogOut, Rss, Settings, Shield, Users } from 'lucide-react'
+import { Activity, Bot, ClipboardList, FileText, LogOut, Rss, Settings, Shield, Users } from 'lucide-react'
 import { logout } from '../lib/api.js'
 
 export default function Layout({ children, user, onLogout }) {
@@ -12,6 +12,7 @@ export default function Layout({ children, user, onLogout }) {
   ]
 
   if (user?.role === 'admin') {
+    links.push({ to: '/audit', label: 'AUDIT', icon: ClipboardList })
     links.push({ to: '/admin', label: 'USERS', icon: Users })
   }
 

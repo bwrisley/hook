@@ -27,6 +27,7 @@ export default function InvestigatePage() {
   const [busy, setBusy] = useState(false)
   const [activeAgent, setActiveAgent] = useState(null)
   const [chainProgress, setChainProgress] = useState([])
+  const [directAgent, setDirectAgent] = useState('')  // '' = Marshall routes
   const activeId = conversationId || null
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -146,6 +147,7 @@ export default function InvestigatePage() {
         message: outgoing,
         conversationId: activeId,
         sessionKey: sessionKeyRef.current,
+        agent: directAgent || undefined,
         onEvent: (event, payload) => {
           if (event === 'meta') {
             if (payload.conversation_id) {
@@ -422,18 +424,38 @@ export default function InvestigatePage() {
           </div>
 
           <div className="border-t border-border p-4">
-            <div className="flex gap-2">
-              <textarea
-                ref={inputRef}
-                className="textarea min-h-16 flex-1"
-                placeholder="Describe an alert, paste IOCs, or ask a security question... Enter to send, Shift+Enter for newline"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                rows={2}
-              />
+            <div className="flex items-end gap-2">
+              <div className="flex flex-1 flex-col gap-2">
+                <textarea
+                  ref={inputRef}
+                  className="textarea min-h-16"
+                  placeholder="Describe an alert, paste IOCs, or ask a security question... Enter to send, Shift+Enter for newline"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  rows={2}
+                />
+                <div className="flex items-center gap-2">
+                  <select
+                    className="input w-auto text-[11px] py-1 px-2"
+                    value={directAgent}
+                    onChange={(e) => setDirectAgent(e.target.value)}
+                  >
+                    <option value="">Marshall (auto-route)</option>
+                    <option value="triage-analyst">Tara (triage)</option>
+                    <option value="osint-researcher">Hunter (enrichment)</option>
+                    <option value="incident-responder">Ward (IR)</option>
+                    <option value="threat-intel">Driver (intel)</option>
+                    <option value="report-writer">Page (reports)</option>
+                    <option value="log-querier">Wells (logs)</option>
+                  </select>
+                  <span className="font-mono text-[10px] text-dim">
+                    {directAgent ? 'Direct to agent' : 'Marshall will route'}
+                  </span>
+                </div>
+              </div>
               <button
-                className="btn btn-primary self-end"
+                className="btn btn-primary"
                 onClick={send}
                 disabled={busy || !input.trim()}
               >

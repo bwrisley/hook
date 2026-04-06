@@ -23,16 +23,14 @@ export async function getMe() {
  * Stream a chat message via SSE.
  * Shadowbox events: agent_start, agent_result, coordinator, investigation.
  */
-export async function streamChat({ message, conversationId, sessionKey, onEvent }) {
+export async function streamChat({ message, conversationId, sessionKey, agent, onEvent }) {
+  const body = { message, conversation_id: conversationId, session_key: sessionKey }
+  if (agent) body.agent = agent
   const response = await fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({
-      message,
-      conversation_id: conversationId,
-      session_key: sessionKey,
-    }),
+    body: JSON.stringify(body),
   })
 
   if (!response.ok || !response.body) {
