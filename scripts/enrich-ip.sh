@@ -1,27 +1,47 @@
 #!/bin/bash
-# enrich-ip.sh — Multi-source IP enrichment (VT + AbuseIPDB + Censys + DNS)
-# Usage: ./scripts/enrich-ip.sh <IP>
-#        ./scripts/enrich-ip.sh --no-cache <IP>    (skip cache, force live)
+# enrich-ip.sh — Multi-source IP enrichment
+# Usage: ./scripts/enrich-ip.sh [options] <IP>
+#   --no-cache           Skip cache, force live queries
+#   --source <sources>   Comma-separated list of sources to query
+#                        Options: virustotal,abuseipdb,censys,otx,shodan,urlhaus,threatfox,dns
+#                        Default: all
 # Output: JSON object with combined findings
-# Requires: $VT_API_KEY, $ABUSEIPDB_API_KEY, $CENSYS_API_ID, $CENSYS_API_SECRET
 
 set -euo pipefail
 
 NO_CACHE=0
-if [ "${1:-}" = "--no-cache" ]; then
-    NO_CACHE=1
-    shift
-fi
+SOURCES="all"
+while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+        --no-cache) NO_CACHE=1; shift ;;
+        --source) SOURCES="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
 
-IP="${1:?Usage: enrich-ip.sh [--no-cache] <IP>}"
+IP="${1:?Usage: enrich-ip.sh [--no-cache] [--source vt,shodan,...] <IP>}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-python3 - "$IP" "$SCRIPT_DIR" "$NO_CACHE" <<'PYEOF'
+python3 - "$IP" "$SCRIPT_DIR" "$NO_CACHE" "$SOURCES" <<'PYEOF'
 import sys, os
 
 ip_arg = sys.argv[1]
 script_dir = sys.argv[2]
 no_cache = sys.argv[3] == '1'
+sources_arg = sys.argv[4]
+
+# Parse source filter
+if sources_arg == 'all':
+    run_sources = None  # run all
+else:
+    aliases = {'vt': 'virustotal', 'abuse': 'abuseipdb', 'otx': 'otx', 'shodan': 'shodan', 'urlhaus': 'urlhaus', 'threatfox': 'threatfox', 'censys': 'censys', 'dns': 'dns'}
+    run_sources = set()
+    for s in sources_arg.split(','):
+        s = s.strip().lower()
+        run_sources.add(aliases.get(s, s))
+
+def should_run(name):
+    return run_sources is None or name in run_sources
 
 exec(open(os.path.join(script_dir, 'lib', 'common.py')).read())
 
@@ -46,7 +66,7 @@ results = {'ioc': ip, 'type': 'ip', 'sources': {}}
 
 # VirusTotal
 vt_key = os.environ.get('VT_API_KEY', '')
-if vt_key:
+if should_run('virustotal') and vt_key:
     vt = curl_json([
         'https://www.virustotal.com/api/v3/ip_addresses/' + ip,
         '-H', 'x-apikey: ' + vt_key
@@ -67,12 +87,12 @@ if vt_key:
     else:
         results['sources']['virustotal'] = vt
         log_warn(SCRIPT, f'VT lookup failed for {ip}', vt)
-else:
+elif should_run('virustotal'):
     results['sources']['virustotal'] = {'error': 'no_api_key'}
 
 # AbuseIPDB
 abuse_key = os.environ.get('ABUSEIPDB_API_KEY', '')
-if abuse_key:
+if should_run('abuseipdb') and abuse_key:
     abuse = curl_json([
         '-G', 'https://api.abuseipdb.com/api/v2/check',
         '-d', 'ipAddress=' + ip,
@@ -93,13 +113,13 @@ if abuse_key:
     else:
         results['sources']['abuseipdb'] = abuse
         log_warn(SCRIPT, f'AbuseIPDB lookup failed for {ip}', abuse)
-else:
+elif should_run('abuseipdb'):
     results['sources']['abuseipdb'] = {'error': 'no_api_key'}
 
 # Censys
 censys_id = os.environ.get('CENSYS_API_ID', '')
 censys_secret = os.environ.get('CENSYS_API_SECRET', '')
-if censys_id and censys_secret:
+if should_run('censys') and censys_id and censys_secret:
     censys = curl_json([
         '-u', censys_id + ':' + censys_secret,
         'https://search.censys.io/api/v2/hosts/' + ip
@@ -117,12 +137,12 @@ if censys_id and censys_secret:
     else:
         results['sources']['censys'] = censys
         log_warn(SCRIPT, f'Censys lookup failed for {ip}', censys)
-else:
+elif should_run('censys'):
     results['sources']['censys'] = {'error': 'no_api_key'}
 
 # AlienVault OTX
 otx_key = os.environ.get('OTX_API_KEY', '')
-if otx_key:
+if should_run('otx') and otx_key:
     rate_limit_wait('otx')
     otx = curl_json([
         'https://otx.alienvault.com/api/v1/indicators/IPv4/' + ip + '/general',
@@ -156,12 +176,12 @@ if otx_key:
     else:
         results['sources']['otx'] = otx
         log_warn(SCRIPT, f'OTX lookup failed for {ip}', otx)
-else:
+elif should_run('otx'):
     results['sources']['otx'] = {'error': 'no_api_key'}
 
 # Shodan
 shodan_key = os.environ.get('SHODAN_API_KEY', '')
-if shodan_key:
+if should_run('shodan') and shodan_key:
     rate_limit_wait('shodan')
     shodan = curl_json([
         'https://api.shodan.io/shodan/host/' + ip + '?key=' + shodan_key
@@ -191,45 +211,46 @@ if shodan_key:
     else:
         results['sources']['shodan'] = shodan
         log_warn(SCRIPT, f'Shodan lookup failed for {ip}', shodan)
-else:
+elif should_run('shodan'):
     results['sources']['shodan'] = {'error': 'no_api_key'}
 
 # URLhaus (no API key needed)
-urlhaus = curl_json([
-    '-X', 'POST', 'https://urlhaus-api.abuse.ch/v1/host/',
-    '-d', 'host=' + ip
-], api_name='urlhaus')
-if 'error' not in urlhaus and urlhaus.get('query_status') == 'is_listed':
-    urls = urlhaus.get('urls', [])
-    results['sources']['urlhaus'] = {
-        'listed': True,
-        'url_count': urlhaus.get('url_count', 0),
-        'urls': [{'url': u.get('url', ''), 'status': u.get('url_status', ''), 'threat': u.get('threat', ''), 'tags': u.get('tags', [])} for u in urls[:5]],
-    }
-elif urlhaus.get('query_status') == 'no_results':
-    results['sources']['urlhaus'] = {'listed': False, 'url_count': 0}
-else:
-    results['sources']['urlhaus'] = {'listed': False, 'url_count': 0}
+if should_run('urlhaus'):
+    urlhaus = curl_json([
+        '-X', 'POST', 'https://urlhaus-api.abuse.ch/v1/host/',
+        '-d', 'host=' + ip
+    ], api_name='urlhaus')
+    if 'error' not in urlhaus and urlhaus.get('query_status') == 'is_listed':
+        urls = urlhaus.get('urls', [])
+        results['sources']['urlhaus'] = {
+            'listed': True,
+            'url_count': urlhaus.get('url_count', 0),
+            'urls': [{'url': u.get('url', ''), 'status': u.get('url_status', ''), 'threat': u.get('threat', ''), 'tags': u.get('tags', [])} for u in urls[:5]],
+        }
+    else:
+        results['sources']['urlhaus'] = {'listed': False, 'url_count': 0}
 
 # ThreatFox (no API key needed)
-threatfox = curl_json([
-    '-X', 'POST', 'https://threatfox-api.abuse.ch/api/v1/',
-    '-H', 'Content-Type: application/json',
-    '-d', '{"query": "search_ioc", "search_term": "' + ip + '"}'
-], api_name='threatfox')
-if 'error' not in threatfox and threatfox.get('query_status') == 'ok':
-    iocs = threatfox.get('data', [])
-    results['sources']['threatfox'] = {
-        'found': True,
-        'ioc_count': len(iocs) if isinstance(iocs, list) else 0,
-        'iocs': [{'malware': i.get('malware', ''), 'threat_type': i.get('threat_type', ''), 'confidence': i.get('confidence_level', 0), 'first_seen': i.get('first_seen_utc', '')} for i in (iocs if isinstance(iocs, list) else [])[:5]],
-    }
-else:
-    results['sources']['threatfox'] = {'found': False, 'ioc_count': 0}
+if should_run('threatfox'):
+    threatfox = curl_json([
+        '-X', 'POST', 'https://threatfox-api.abuse.ch/api/v1/',
+        '-H', 'Content-Type: application/json',
+        '-d', '{"query": "search_ioc", "search_term": "' + ip + '"}'
+    ], api_name='threatfox')
+    if 'error' not in threatfox and threatfox.get('query_status') == 'ok':
+        iocs = threatfox.get('data', [])
+        results['sources']['threatfox'] = {
+            'found': True,
+            'ioc_count': len(iocs) if isinstance(iocs, list) else 0,
+            'iocs': [{'malware': i.get('malware', ''), 'threat_type': i.get('threat_type', ''), 'confidence': i.get('confidence_level', 0), 'first_seen': i.get('first_seen_utc', '')} for i in (iocs if isinstance(iocs, list) else [])[:5]],
+        }
+    else:
+        results['sources']['threatfox'] = {'found': False, 'ioc_count': 0}
 
 # DNS (reverse)
-ptr = run_cmd(['dig', '-x', ip, '+short'])
-results['sources']['dns'] = {'ptr': ptr if ptr else 'none'}
+if should_run('dns'):
+    ptr = run_cmd(['dig', '-x', ip, '+short'])
+    results['sources']['dns'] = {'ptr': ptr if ptr else 'none'}
 
 # Risk assessment
 vt_mal = results['sources'].get('virustotal', {}).get('malicious', 0)

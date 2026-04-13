@@ -1,27 +1,44 @@
 #!/bin/bash
-# enrich-hash.sh — File hash enrichment (VirusTotal)
-# Usage: ./scripts/enrich-hash.sh <SHA256|SHA1|MD5>
-#        ./scripts/enrich-hash.sh --no-cache <HASH>    (skip cache, force live)
-# Output: JSON object with VT findings
-# Requires: $VT_API_KEY
+# enrich-hash.sh — File hash enrichment
+# Usage: ./scripts/enrich-hash.sh [options] <SHA256|SHA1|MD5>
+#   --no-cache           Skip cache, force live queries
+#   --source <sources>   Comma-separated: virustotal,otx,threatfox
+# Output: JSON object with findings
 
 set -euo pipefail
 
 NO_CACHE=0
-if [ "${1:-}" = "--no-cache" ]; then
-    NO_CACHE=1
-    shift
-fi
+SOURCES="all"
+while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+        --no-cache) NO_CACHE=1; shift ;;
+        --source) SOURCES="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
 
-HASH="${1:?Usage: enrich-hash.sh [--no-cache] <HASH>}"
+HASH="${1:?Usage: enrich-hash.sh [--no-cache] [--source vt,otx,...] <HASH>}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-python3 - "$HASH" "$SCRIPT_DIR" "$NO_CACHE" <<'PYEOF'
+python3 - "$HASH" "$SCRIPT_DIR" "$NO_CACHE" "$SOURCES" <<'PYEOF'
 import sys, os
 
 hash_arg = sys.argv[1]
 script_dir = sys.argv[2]
 no_cache = sys.argv[3] == '1'
+sources_arg = sys.argv[4]
+
+if sources_arg == 'all':
+    run_sources = None
+else:
+    aliases = {'vt': 'virustotal', 'otx': 'otx', 'threatfox': 'threatfox'}
+    run_sources = set()
+    for s in sources_arg.split(','):
+        s = s.strip().lower()
+        run_sources.add(aliases.get(s, s))
+
+def should_run(name):
+    return run_sources is None or name in run_sources
 
 exec(open(os.path.join(script_dir, 'lib', 'common.py')).read())
 
@@ -44,7 +61,7 @@ log_info(SCRIPT, f'Starting enrichment for {file_hash[:16]}...')
 results = {'ioc': file_hash, 'type': 'hash', 'sources': {}}
 
 vt_key = os.environ.get('VT_API_KEY', '')
-if vt_key:
+if should_run('virustotal') and vt_key:
     vt = curl_json([
         'https://www.virustotal.com/api/v3/files/' + file_hash,
         '-H', 'x-apikey: ' + vt_key
@@ -77,12 +94,12 @@ if vt_key:
             'last_seen': attrs.get('last_analysis_date', 0),
             'popular_threat_name': attrs.get('popular_threat_classification', {}).get('suggested_threat_label', 'unknown')
         }
-else:
+elif should_run('virustotal'):
     results['sources']['virustotal'] = {'error': 'no_api_key'}
 
 # AlienVault OTX
 otx_key = os.environ.get('OTX_API_KEY', '')
-if otx_key:
+if should_run('otx') and otx_key:
     rate_limit_wait('otx')
     hash_type = 'FileHash-SHA256' if len(file_hash) == 64 else 'FileHash-MD5' if len(file_hash) == 32 else 'FileHash-SHA1'
     otx = curl_json([
@@ -105,24 +122,25 @@ if otx_key:
     else:
         results['sources']['otx'] = otx
         log_warn(SCRIPT, f'OTX lookup failed for {file_hash[:16]}', otx)
-else:
+elif should_run('otx'):
     results['sources']['otx'] = {'error': 'no_api_key'}
 
 # ThreatFox (no API key needed)
-threatfox = curl_json([
-    '-X', 'POST', 'https://threatfox-api.abuse.ch/api/v1/',
-    '-H', 'Content-Type: application/json',
-    '-d', '{"query": "search_ioc", "search_term": "' + file_hash + '"}'
-], api_name='threatfox')
-if 'error' not in threatfox and threatfox.get('query_status') == 'ok':
-    iocs = threatfox.get('data', [])
-    results['sources']['threatfox'] = {
-        'found': True,
-        'ioc_count': len(iocs) if isinstance(iocs, list) else 0,
-        'iocs': [{'malware': i.get('malware', ''), 'threat_type': i.get('threat_type', ''), 'confidence': i.get('confidence_level', 0)} for i in (iocs if isinstance(iocs, list) else [])[:5]],
-    }
-else:
-    results['sources']['threatfox'] = {'found': False, 'ioc_count': 0}
+if should_run('threatfox'):
+    threatfox = curl_json([
+        '-X', 'POST', 'https://threatfox-api.abuse.ch/api/v1/',
+        '-H', 'Content-Type: application/json',
+        '-d', '{"query": "search_ioc", "search_term": "' + file_hash + '"}'
+    ], api_name='threatfox')
+    if 'error' not in threatfox and threatfox.get('query_status') == 'ok':
+        iocs = threatfox.get('data', [])
+        results['sources']['threatfox'] = {
+            'found': True,
+            'ioc_count': len(iocs) if isinstance(iocs, list) else 0,
+            'iocs': [{'malware': i.get('malware', ''), 'threat_type': i.get('threat_type', ''), 'confidence': i.get('confidence_level', 0)} for i in (iocs if isinstance(iocs, list) else [])[:5]],
+        }
+    else:
+        results['sources']['threatfox'] = {'found': False, 'ioc_count': 0}
 
 # Risk assessment
 vt_data = results['sources'].get('virustotal', {})
