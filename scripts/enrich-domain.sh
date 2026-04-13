@@ -131,10 +131,43 @@ if otx_key:
 else:
     results['sources']['otx'] = {'error': 'no_api_key'}
 
+# URLhaus (no API key needed)
+urlhaus = curl_json([
+    '-X', 'POST', 'https://urlhaus-api.abuse.ch/v1/host/',
+    '-d', 'host=' + domain
+], api_name='urlhaus')
+if 'error' not in urlhaus and urlhaus.get('query_status') == 'is_listed':
+    urls = urlhaus.get('urls', [])
+    results['sources']['urlhaus'] = {
+        'listed': True,
+        'url_count': urlhaus.get('url_count', 0),
+        'urls': [{'url': u.get('url', ''), 'status': u.get('url_status', ''), 'threat': u.get('threat', ''), 'tags': u.get('tags', [])} for u in urls[:5]],
+    }
+else:
+    results['sources']['urlhaus'] = {'listed': False, 'url_count': 0}
+
+# ThreatFox (no API key needed)
+threatfox = curl_json([
+    '-X', 'POST', 'https://threatfox-api.abuse.ch/api/v1/',
+    '-H', 'Content-Type: application/json',
+    '-d', '{"query": "search_ioc", "search_term": "' + domain + '"}'
+], api_name='threatfox')
+if 'error' not in threatfox and threatfox.get('query_status') == 'ok':
+    iocs = threatfox.get('data', [])
+    results['sources']['threatfox'] = {
+        'found': True,
+        'ioc_count': len(iocs) if isinstance(iocs, list) else 0,
+        'iocs': [{'malware': i.get('malware', ''), 'threat_type': i.get('threat_type', ''), 'confidence': i.get('confidence_level', 0)} for i in (iocs if isinstance(iocs, list) else [])[:5]],
+    }
+else:
+    results['sources']['threatfox'] = {'found': False, 'ioc_count': 0}
+
 # Risk assessment
 vt_mal = results['sources'].get('virustotal', {}).get('malicious', 0)
 otx_pulses = results['sources'].get('otx', {}).get('pulse_count', 0)
-if vt_mal > 5 or otx_pulses > 10:
+urlhaus_listed = results['sources'].get('urlhaus', {}).get('listed', False)
+threatfox_found = results['sources'].get('threatfox', {}).get('found', False)
+if vt_mal > 5 or otx_pulses > 10 or urlhaus_listed or threatfox_found:
     results['risk'] = 'HIGH'
 elif vt_mal > 0 or otx_pulses > 3:
     results['risk'] = 'MEDIUM'

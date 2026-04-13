@@ -108,13 +108,30 @@ if otx_key:
 else:
     results['sources']['otx'] = {'error': 'no_api_key'}
 
+# ThreatFox (no API key needed)
+threatfox = curl_json([
+    '-X', 'POST', 'https://threatfox-api.abuse.ch/api/v1/',
+    '-H', 'Content-Type: application/json',
+    '-d', '{"query": "search_ioc", "search_term": "' + file_hash + '"}'
+], api_name='threatfox')
+if 'error' not in threatfox and threatfox.get('query_status') == 'ok':
+    iocs = threatfox.get('data', [])
+    results['sources']['threatfox'] = {
+        'found': True,
+        'ioc_count': len(iocs) if isinstance(iocs, list) else 0,
+        'iocs': [{'malware': i.get('malware', ''), 'threat_type': i.get('threat_type', ''), 'confidence': i.get('confidence_level', 0)} for i in (iocs if isinstance(iocs, list) else [])[:5]],
+    }
+else:
+    results['sources']['threatfox'] = {'found': False, 'ioc_count': 0}
+
 # Risk assessment
 vt_data = results['sources'].get('virustotal', {})
 vt_mal = vt_data.get('malicious', 0)
 otx_pulses = results['sources'].get('otx', {}).get('pulse_count', 0)
+threatfox_found = results['sources'].get('threatfox', {}).get('found', False)
 if not vt_data.get('found', True):
     results['risk'] = 'UNKNOWN'
-elif vt_mal > 10 or otx_pulses > 5:
+elif vt_mal > 10 or otx_pulses > 5 or threatfox_found:
     results['risk'] = 'HIGH'
 elif vt_mal > 0 or otx_pulses > 0:
     results['risk'] = 'MEDIUM'
