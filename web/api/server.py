@@ -425,6 +425,22 @@ class WebSessionDB:
         ).fetchone()
         return row[0] if row else None
 
+    def link_investigation(self, conversation_id: str, investigation_id: str) -> None:
+        """Link a conversation to an investigation."""
+        self._conn.execute(
+            "UPDATE conversations SET investigation_id = ? WHERE conversation_id = ?",
+            (investigation_id, conversation_id),
+        )
+        self._conn.commit()
+
+    def get_conversation_for_investigation(self, investigation_id: str) -> str | None:
+        """Find the conversation linked to an investigation."""
+        row = self._conn.execute(
+            "SELECT conversation_id FROM conversations WHERE investigation_id = ?",
+            (investigation_id,),
+        ).fetchone()
+        return row[0] if row else None
+
     def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation and all its messages."""
         self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
@@ -810,6 +826,11 @@ Respond to the operator's latest message. Use the conversation context to resolv
                     tracker.record_done(agent, meta=meta, conversation_id=conversation_id)
                     if content:
                         web_db.add_message(conversation_id, "assistant", content, agent=agent, msg_type=event_type)
+                        # Detect investigation creation (INV-YYYYMMDD-NNN)
+                        import re as _re
+                        inv_match = _re.search(r'(INV-\d{8}-\d{3})', content)
+                        if inv_match:
+                            web_db.link_investigation(conversation_id, inv_match.group(1))
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -962,7 +983,11 @@ Respond to the operator's latest message. Use the conversation context to resolv
                         "content": f.read_text(encoding="utf-8"),
                     })
 
-        return {**state, "findings_detail": findings_detail}
+        # Find linked conversation
+        web_db: WebSessionDB = app.state.web_db
+        linked_conversation = web_db.get_conversation_for_investigation(inv_id)
+
+        return {**state, "findings_detail": findings_detail, "conversation_id": linked_conversation}
 
     @app.put("/api/investigations/{inv_id}/status")
     async def update_investigation_status(inv_id: str, request: Request):

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { MessageSquare } from 'lucide-react'
 import { api, AGENT_LABELS } from '../lib/api.js'
 import AgentBadge from '../components/AgentBadge.jsx'
 import InvestigationTimeline from '../components/InvestigationTimeline.jsx'
@@ -21,6 +23,7 @@ const riskBadge = (risk) => {
 }
 
 export default function InvestigationsPage() {
+  const navigate = useNavigate()
   const [investigations, setInvestigations] = useState([])
   const [selected, setSelected] = useState(null)
   const [detail, setDetail] = useState(null)
@@ -138,6 +141,15 @@ export default function InvestigationsPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {detail.conversation_id && (
+                  <button
+                    className="btn text-[10px] py-1"
+                    onClick={() => navigate(`/investigate/${detail.conversation_id}`)}
+                    title="View the chat conversation for this investigation"
+                  >
+                    <MessageSquare className="h-3 w-3" /> View Chat
+                  </button>
+                )}
                 <select
                   className="input w-auto text-[11px] py-1 px-2"
                   value={detail.status}

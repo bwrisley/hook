@@ -288,7 +288,10 @@ export default function InvestigatePage() {
                 <div className="truncate font-mono text-xs text-accent pr-6">
                   {conv.title || conv.conversation_id}
                 </div>
-                <div className="mt-1 flex items-center gap-2">
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  {conv.investigation_id && (
+                    <span className="badge badge-amber text-[9px]">{conv.investigation_id}</span>
+                  )}
                   {conv.access && conv.access !== 'owner' && (
                     <span className={`badge text-[9px] ${conv.access === 'collaborate' ? 'badge-amber' : 'badge-dim'}`}>
                       {conv.access === 'read' ? 'shared' : conv.access === 'collaborate' ? 'collab' : conv.access}
