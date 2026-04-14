@@ -1,0 +1,84 @@
+# docker-compose.yml — Shadowbox local development stack
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose logs -f web    # Follow web logs
+#   docker compose down           # Stop all services
+#
+# Access:
+#   Web UI:  http://localhost:7799
+#   Gateway: http://localhost:18789
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "7799:7799"
+    env_file: .env
+    environment:
+      - HOOK_DIR=/app
+      - DATABASE_URL=postgresql://shadowbox:shadowbox@db:5432/shadowbox
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - HOOK_GATEWAY_URL=http://gateway:18789
+    depends_on:
+      db:
+        condition: service_healthy
+      gateway:
+        condition: service_started
+    volumes:
+      - feed-data:/app/data/feeds
+      - cache-data:/app/data/cache
+      - faiss-data:/app/data/faiss
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    ports:
+      - "18789:18789"
+    env_file: .env
+    environment:
+      - HOOK_DIR=/app
+    volumes:
+      - openclaw-data:/home/node/.openclaw
+      - feed-data:/app/data/feeds
+      - cache-data:/app/data/cache
+      - investigation-data:/app/data/investigations
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: shadowbox
+      POSTGRES_USER: shadowbox
+      POSTGRES_PASSWORD: shadowbox
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shadowbox"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  pg-data:
+  openclaw-data:
+  feed-data:
+  cache-data:
+  faiss-data:
+  investigation-data:
+  ollama-models:

@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.4.1"
+  },
+  "env": {
+    "shellEnv": {
+      "enabled": true
+    },
+    "HOOK_DIR": "/app"
+  },
+  "tools": {
+    "profile": "full",
+    "exec": {
+      "backgroundMs": 30000,
+      "timeoutSec": 300
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openai/gpt-4.1"
+      },
+      "maxConcurrent": 5,
+      "subagents": {
+        "maxConcurrent": 5,
+        "maxSpawnDepth": 1,
+        "maxChildrenPerAgent": 5,
+        "runTimeoutSeconds": 300,
+        "archiveAfterMinutes": 60
+      }
+    },
+    "list": [
+      {
+        "id": "coordinator",
+        "default": true,
+        "workspace": "/app/workspaces/coordinator",
+        "model": { "primary": "openai/gpt-4.1" },
+        "subagents": {
+          "allowAgents": ["triage-analyst", "osint-researcher", "incident-responder", "threat-intel", "report-writer", "log-querier"]
+        }
+      },
+      { "id": "triage-analyst", "workspace": "/app/workspaces/triage-analyst", "model": { "primary": "openai/gpt-4.1" } },
+      { "id": "osint-researcher", "workspace": "/app/workspaces/osint-researcher", "model": { "primary": "openai/gpt-4.1" } },
+      { "id": "incident-responder", "workspace": "/app/workspaces/incident-responder", "model": { "primary": "openai/gpt-4.1" } },
+      { "id": "threat-intel", "workspace": "/app/workspaces/threat-intel", "model": { "primary": "openai/gpt-5" } },
+      { "id": "report-writer", "workspace": "/app/workspaces/report-writer", "model": { "primary": "openai/gpt-5" } },
+      { "id": "log-querier", "workspace": "/app/workspaces/log-querier", "model": { "primary": "openai/gpt-4.1" } }
+    ]
+  },
+  "bindings": [
+    { "agentId": "coordinator", "match": { "channel": "api" } }
+  ],
+  "session": {},
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "entries": {
+        "session-memory": {},
+        "command-logger": {}
+      }
+    }
+  },
+  "channels": {},
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "controlUi": { "enabled": true }
+  },
+  "plugins": {}
+}

@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+
+# Node
+web/node_modules
+web/dist
+
+# Python
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+
+# IDE
+.vscode
+.idea
+
+# Runtime data (not needed in image)
+data/cache
+data/faiss
+data/feeds
+data/investigations
+data/reports
+data/*.db
+
+# Secrets
+.env
+openclaw.json
+
+# macOS
+.DS_Store
+
+# Docs
+docs/
+*.md
+!README.md
+
+# Tests (optional in prod)
+# tests/
+
+# Misc
+*.tar
+*.tar.gz
+*.log
+#hook

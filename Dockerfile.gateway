@@ -1,0 +1,35 @@
+# Dockerfile.gateway — OpenClaw Gateway with security tools
+#
+# BUILD:  docker build -f Dockerfile.gateway -t shadowbox-gateway:latest .
+# RUN:    docker run -p 18789:18789 -v ./data:/app/data shadowbox-gateway:latest
+
+FROM ghcr.io/openclaw/openclaw:latest
+
+USER root
+
+# Install security analysis tools for agent exec
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    jq \
+    dnsutils \
+    whois \
+    nmap \
+    iputils-ping \
+    traceroute \
+    python3 \
+    python3-pip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy HOOK scripts and workspaces
+COPY scripts/ /app/scripts/
+COPY workspaces/ /app/workspaces/
+COPY config/openclaw.json.template /app/config/
+
+RUN chmod +x /app/scripts/*.sh /app/scripts/*.py 2>/dev/null || true
+RUN mkdir -p /app/data/feeds /app/data/cache /app/data/investigations
+
+ENV HOOK_DIR=/app
+
+USER node
+
+CMD ["openclaw", "gateway", "start", "--port", "18789"]
