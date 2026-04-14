@@ -637,6 +637,56 @@ def create_app() -> FastAPI:
                     except Exception:
                         pass
 
+        # Sparkline data: daily calls for last 7 days
+        sparkline_calls = []
+        sparkline_inv = []
+        try:
+            rows = tracker_inst._conn.execute(
+                "SELECT DATE(timestamp) as day, COUNT(*) as calls "
+                "FROM token_usage WHERE timestamp > datetime('now', '-7 days') GROUP BY DATE(timestamp) ORDER BY day"
+            ).fetchall()
+            sparkline_calls = [r[1] for r in rows]
+        except Exception:
+            pass
+
+        # Investigation sparkline (created per day)
+        if INVESTIGATIONS_DIR.exists():
+            from collections import defaultdict as _dd
+            inv_by_day = _dd(int)
+            for inv_dir in INVESTIGATIONS_DIR.iterdir():
+                sf = inv_dir / "state.json"
+                if sf.exists():
+                    try:
+                        s = json.loads(sf.read_text())
+                        day = s.get("created_at", "")[:10]
+                        if day:
+                            inv_by_day[day] += 1
+                    except Exception:
+                        pass
+            if inv_by_day:
+                sorted_days = sorted(inv_by_day.keys())[-7:]
+                sparkline_inv = [inv_by_day[d] for d in sorted_days]
+
+        # Agent response times (average duration per agent)
+        agent_response_times = {}
+        try:
+            rows = tracker_inst._conn.execute(
+                "SELECT agent, AVG(duration_ms) as avg_ms, MIN(duration_ms) as min_ms, MAX(duration_ms) as max_ms, COUNT(*) as calls "
+                "FROM token_usage WHERE duration_ms > 0 GROUP BY agent"
+            ).fetchall()
+            for r in rows:
+                agent_response_times[r[0]] = {
+                    "avg_ms": round(r[1] or 0),
+                    "min_ms": r[2] or 0,
+                    "max_ms": r[3] or 0,
+                    "calls": r[4],
+                }
+        except Exception:
+            pass
+
+        # Active agents right now
+        active_agents = [aid for aid, info in tracker_inst.get_status().items() if info.get("status") == "working"]
+
         # CISA KEV (fetch cached or live)
         kev_data = await _get_cisa_kev()
 
@@ -651,6 +701,10 @@ def create_app() -> FastAPI:
             "risk_distribution": risk_dist,
             "recent_investigations": recent_investigations,
             "cisa_kev": kev_data,
+            "sparkline_calls": sparkline_calls,
+            "sparkline_inv": sparkline_inv,
+            "agent_response_times": agent_response_times,
+            "active_agents": active_agents,
         }
 
     async def _get_cisa_kev() -> dict[str, Any]:
