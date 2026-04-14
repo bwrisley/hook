@@ -19,7 +19,7 @@ from web.api.sse import sse_event, extract_highlights
 
 logger = logging.getLogger(__name__)
 
-AGENT_TIMEOUT = 180  # seconds
+AGENT_TIMEOUT = 300  # seconds (5 min — 8-source enrichment can be slow)
 
 def _load_env_file() -> dict[str, str]:
     """Load API keys from .env file if not already in environment."""
