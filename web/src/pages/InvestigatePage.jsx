@@ -402,6 +402,29 @@ export default function InvestigatePage() {
               </div>
             ))}
 
+            {/* Waiting indicator — shows when last message is routing but no result yet */}
+            {!busy && messages.length > 0 && (() => {
+              const last = messages[messages.length - 1]
+              const hasResult = messages.some((m) => m.type === 'agent_result')
+              const lastIsRouting = last.type === 'coordinator' || (last.agent === 'coordinator' && last.role === 'assistant')
+              const lastIsUser = last.role === 'user'
+              if ((lastIsRouting || lastIsUser) && !hasResult) {
+                return (
+                  <div className="rounded-xl border border-accent/20 bg-accent/5 p-4">
+                    <div className="flex items-center gap-2">
+                      <span className="activity-ellipsis text-accent" aria-hidden="true">
+                        <span /><span /><span />
+                      </span>
+                      <span className="font-mono text-xs text-accent">
+                        Agent is working on your request. Results will appear here automatically.
+                      </span>
+                    </div>
+                  </div>
+                )
+              }
+              return null
+            })()}
+
             {/* Chain progress indicator */}
             {busy && chainProgress.length > 0 && (
               <div className="rounded-xl border border-accent/20 bg-accent/5 p-4">
