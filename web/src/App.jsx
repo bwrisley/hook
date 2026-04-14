@@ -11,6 +11,7 @@ import SettingsPage from './pages/SettingsPage.jsx'
 import AdminPage from './pages/AdminPage.jsx'
 import AuditPage from './pages/AuditPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
+import TeamPage from './pages/TeamPage.jsx'
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/investigations" element={<InvestigationsPage />} />
         <Route path="/feeds" element={<FeedsPage />} />
+        <Route path="/team" element={<TeamPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         {user.role === 'admin' && <Route path="/admin" element={<AdminPage />} />}
         {user.role === 'admin' && <Route path="/audit" element={<AuditPage />} />}

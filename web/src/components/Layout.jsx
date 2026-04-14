@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Activity, Bot, ClipboardList, FileText, LayoutDashboard, LogOut, Rss, Settings, Shield, Users } from 'lucide-react'
+import { Activity, Bot, ClipboardList, FileText, LayoutDashboard, LogOut, Rss, Settings, Shield, Users, UsersRound } from 'lucide-react'
 import { logout } from '../lib/api.js'
 import NotificationBell from './NotificationBell.jsx'
 
@@ -9,6 +9,7 @@ export default function Layout({ children, user, onLogout }) {
     { to: '/investigate', label: 'INVESTIGATE', icon: Bot },
     { to: '/agents', label: 'AGENTS', icon: Activity },
     { to: '/investigations', label: 'HISTORY', icon: FileText },
+    { to: '/team', label: 'TEAM', icon: UsersRound },
     { to: '/feeds', label: 'FEEDS', icon: Rss },
     { to: '/settings', label: 'SETTINGS', icon: Settings },
   ]

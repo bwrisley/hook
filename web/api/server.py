@@ -1028,8 +1028,56 @@ Respond to the operator's latest message. Use the conversation context to resolv
                         # Detect investigation creation (INV-YYYYMMDD-NNN)
                         import re as _re
                         inv_match = _re.search(r'(INV-\d{8}-\d{3})', content)
-                        if inv_match:
-                            web_db.link_investigation(conversation_id, inv_match.group(1))
+                        inv_id = inv_match.group(1) if inv_match else None
+                        if inv_id:
+                            web_db.link_investigation(conversation_id, inv_id)
+
+                        # Log to shared activity feed
+                        wl: WatchlistDB = app.state.watchlist
+                        if agent == "osint-researcher":
+                            # Extract IOC and risk from enrichment results
+                            ioc_match = _re.search(r'IOC:\s*(\S+)', content)
+                            risk_match = _re.search(r'Risk Level:\s*(\w+)', content)
+                            if ioc_match:
+                                ioc_val = ioc_match.group(1)
+                                risk_val = risk_match.group(1) if risk_match else None
+                                ioc_t = "ip" if _re.match(r'\d+\.\d+\.\d+\.\d+', ioc_val) else "domain" if "." in ioc_val else "hash"
+                                wl.log_activity(
+                                    user_id=user["username"],
+                                    action="enrichment",
+                                    ioc_value=ioc_val,
+                                    ioc_type=ioc_t,
+                                    risk=risk_val,
+                                    detail=f"Enriched by Hunter",
+                                    conversation_id=conversation_id,
+                                    investigation_id=inv_id,
+                                )
+                        elif agent == "triage-analyst":
+                            verdict_match = _re.search(r'Verdict:\s*(True Positive|False Positive|Suspicious|Escalate|TP|FP)', content, _re.IGNORECASE)
+                            if verdict_match:
+                                wl.log_activity(
+                                    user_id=user["username"],
+                                    action="triage",
+                                    detail=f"Tara verdict: {verdict_match.group(1)}",
+                                    conversation_id=conversation_id,
+                                    investigation_id=inv_id,
+                                )
+                        elif agent == "threat-intel":
+                            wl.log_activity(
+                                user_id=user["username"],
+                                action="analysis",
+                                detail="Driver completed threat assessment",
+                                conversation_id=conversation_id,
+                                investigation_id=inv_id,
+                            )
+                        elif agent == "report-writer":
+                            wl.log_activity(
+                                user_id=user["username"],
+                                action="report",
+                                detail="Page delivered report",
+                                conversation_id=conversation_id,
+                                investigation_id=inv_id,
+                            )
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -1134,6 +1182,20 @@ Respond to the operator's latest message. Use the conversation context to resolv
         wl: WatchlistDB = app.state.watchlist
         wl.mark_all_read(user["username"])
         return {"status": "ok"}
+
+    @app.get("/api/activity")
+    async def activity_feed(request: Request):
+        """Shared team activity feed — all enrichments, investigations, findings."""
+        user = get_current_user(request)
+        wl: WatchlistDB = app.state.watchlist
+        return {"items": wl.get_activity(limit=100)}
+
+    @app.get("/api/activity/ioc/{ioc_value}")
+    async def ioc_activity(ioc_value: str, request: Request):
+        """Activity history for a specific IOC across all users."""
+        user = get_current_user(request)
+        wl: WatchlistDB = app.state.watchlist
+        return {"ioc": ioc_value, "history": wl.get_ioc_history(ioc_value)}
 
     @app.get("/api/investigations")
     async def investigations() -> dict[str, Any]:

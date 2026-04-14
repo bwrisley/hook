@@ -56,7 +56,66 @@ class WatchlistDB:
                 created_at TEXT NOT NULL
             )
         """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS activity_feed (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                ioc_value TEXT,
+                ioc_type TEXT,
+                risk TEXT,
+                detail TEXT,
+                conversation_id TEXT,
+                investigation_id TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
         self._conn.commit()
+
+    # -- Activity Feed --
+
+    def log_activity(
+        self,
+        user_id: str,
+        action: str,
+        ioc_value: str | None = None,
+        ioc_type: str | None = None,
+        risk: str | None = None,
+        detail: str | None = None,
+        conversation_id: str | None = None,
+        investigation_id: str | None = None,
+    ) -> None:
+        """Log an activity to the shared team feed."""
+        now = datetime.now(timezone.utc).isoformat()
+        self._conn.execute(
+            "INSERT INTO activity_feed (user_id, action, ioc_value, ioc_type, risk, detail, conversation_id, investigation_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, action, ioc_value, ioc_type, risk, detail, conversation_id, investigation_id, now),
+        )
+        self._conn.commit()
+
+    def get_activity(self, limit: int = 50) -> list[dict]:
+        """Get the shared activity feed (all users)."""
+        rows = self._conn.execute(
+            "SELECT id, user_id, action, ioc_value, ioc_type, risk, detail, conversation_id, investigation_id, created_at "
+            "FROM activity_feed ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            {
+                "id": r[0], "user_id": r[1], "action": r[2], "ioc_value": r[3],
+                "ioc_type": r[4], "risk": r[5], "detail": r[6],
+                "conversation_id": r[7], "investigation_id": r[8], "created_at": r[9],
+            }
+            for r in rows
+        ]
+
+    def get_ioc_history(self, ioc_value: str) -> list[dict]:
+        """Get all activity for a specific IOC across all users."""
+        rows = self._conn.execute(
+            "SELECT user_id, action, risk, detail, created_at FROM activity_feed WHERE ioc_value = ? ORDER BY created_at DESC LIMIT 20",
+            (ioc_value,),
+        ).fetchall()
+        return [{"user_id": r[0], "action": r[1], "risk": r[2], "detail": r[3], "created_at": r[4]} for r in rows]
 
     # -- Watchlist CRUD --
 
