@@ -130,11 +130,48 @@ def _detect_single_delegation(text: str) -> Optional[str]:
     return None
 
 
+# Commands and patterns that must NEVER be executed by agents
+BLOCKED_PATTERNS = [
+    r"^\s*\./scripts/",
+    r"^\s*/Users/",
+    r"^\s*/bin/",
+    r"^\s*/usr/",
+    r"^\s*/opt/",
+    r"^\s*sudo\b",
+    r"^\s*rm\s",
+    r"^\s*kill\b",
+    r"^\s*shutdown\b",
+    r"^\s*reboot\b",
+    r"^\s*launchctl\b",
+    r"^\s*exec\s*:",
+    r"^\s*curl\s",
+    r"^\s*wget\s",
+    r"^\s*python3?\s+-c",
+    r"^\s*bash\s+-c",
+    r"^\s*sh\s+-c",
+    r"restart\.sh",
+    r"openclaw\s+gateway",
+    r"npm\s+",
+    r"pip\s+",
+    r"brew\s+",
+]
+
+
+def _is_blocked_command(message: str) -> bool:
+    """Check if a message looks like a system command that should not be executed."""
+    lower = message.strip().lower()
+    for pattern in BLOCKED_PATTERNS:
+        if re.search(pattern, lower):
+            return True
+    return False
+
+
 class GatewayBridge:
     """Bridge between Shadowbox's web API and the OpenClaw gateway.
 
     Uses `openclaw agent` CLI for message delivery. Detects multi-agent
     chains and runs each specialist sequentially with accumulated context.
+    Blocks system commands from being executed by agents.
     """
 
     def __init__(self) -> None:
@@ -182,6 +219,18 @@ class GatewayBridge:
         Detects multi-agent chains and runs each specialist sequentially.
         """
         session_id = session_key or str(uuid.uuid4())[:12]
+
+        # SECURITY: Block system commands from reaching agents
+        if _is_blocked_command(message):
+            yield sse_event("meta", {"session_key": session_id, "agent_id": agent_id})
+            yield sse_event("agent_result", {
+                "agent": "coordinator",
+                "content": "That looks like a system command. Shadowbox agents analyze security data — they do not execute system commands. If you need to run a script, use the server terminal directly.",
+                "highlights": {},
+                "meta": {},
+            })
+            yield sse_event("done", {"session_key": session_id})
+            return
 
         yield sse_event("meta", {
             "session_key": session_id,
