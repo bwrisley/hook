@@ -1035,11 +1035,20 @@ Respond to the operator's latest message. Use the conversation context to resolv
                         # Log to shared activity feed
                         wl: WatchlistDB = app.state.watchlist
                         if agent == "osint-researcher":
-                            # Extract IOC and risk from enrichment results
-                            ioc_match = _re.search(r'IOC:\s*(\S+)', content)
-                            risk_match = _re.search(r'Risk Level:\s*(\w+)', content)
+                            # Extract IOC from enrichment results — multiple formats
+                            ioc_match = (
+                                _re.search(r'IOC:\s*(\S+)', content) or
+                                _re.search(r'^IP:\s*(\S+)', content, _re.MULTILINE) or
+                                _re.search(r'Enrichment.*?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', content) or
+                                _re.search(r'Enrichment.*?([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', content)
+                            )
+                            risk_match = (
+                                _re.search(r'Risk Level:\s*(\w+)', content) or
+                                _re.search(r'"risk":\s*"(\w+)"', content) or
+                                _re.search(r'Risk:\s*(\w+)', content)
+                            )
                             if ioc_match:
-                                ioc_val = ioc_match.group(1)
+                                ioc_val = ioc_match.group(1).strip('*,.')
                                 risk_val = risk_match.group(1) if risk_match else None
                                 ioc_t = "ip" if _re.match(r'\d+\.\d+\.\d+\.\d+', ioc_val) else "domain" if "." in ioc_val else "hash"
                                 wl.log_activity(
