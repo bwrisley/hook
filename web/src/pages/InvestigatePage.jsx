@@ -48,6 +48,8 @@ export default function InvestigatePage() {
       setConversations(items)
       if (autoSelect && !activeId && items.length > 0) {
         navigate(`/investigate/${items[0].conversation_id}`, { replace: true })
+        // Also load messages immediately since navigate may not trigger useEffect fast enough
+        loadMessages(items[0].conversation_id)
       }
     } catch { /* gateway may be offline */ }
   }
@@ -81,9 +83,7 @@ export default function InvestigatePage() {
   useEffect(() => {
     if (!activeId) return
     const interval = setInterval(() => {
-      if (!isStreamingRef.current) {
-        loadMessages(activeId)
-      }
+      loadMessages(activeId)
     }, 5000)
     return () => clearInterval(interval)
   }, [activeId])
