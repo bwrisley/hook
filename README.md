@@ -1,260 +1,208 @@
-# HOOK — Hunting, Orchestration & Operational Knowledge
+# Shadowbox
 
 **by PUNCH Cyber**
 
-HOOK is a multi-agent SOC assistant built on [OpenClaw](https://github.com/openclaw/openclaw). It provides AI-powered security operations through six specialist agents coordinated via Slack.
+Shadowbox is a multi-agent SOC operations platform built on [OpenClaw](https://github.com/openclaw/openclaw). Seven specialist AI agents — each with a distinct personality and operational role — collaborate to triage alerts, enrich IOCs, respond to incidents, produce intelligence assessments, and write reports. The platform is operable through a web interface (Shadowbox) and will support Slack as a secondary interface.
+
+The backend system is called HOOK (Hunting, Orchestration & Operational Knowledge).
 
 ## Architecture
 
 ```
-         Slack (#hook)
-              |
-              v
-     +--- Coordinator ---+
-     |   (routes tasks)   |
-     |                    |
-     v        v           v
-  Hunting  Orchestration  Operational
-  Pillar     Pillar      Knowledge Pillar
-     |         |              |
-     +- Triage +- Coordinator +- Threat Intel
-     |  Analyst|  (self)      |
-     |         |              |
-     +- OSINT  +- Incident   +- Report
-       Researcher Responder     Writer
+                   Shadowbox Web UI (:7799)
+                          |
+                   FastAPI + SSE Bridge
+                          |
+                   OpenClaw Gateway (:18789)
+                          |
+           +---------- Marshall ----------+
+           |        (coordinator)         |
+           |                              |
+     +-----+-----+              +--------+--------+
+     |           |              |        |        |
+   Tara       Hunter         Ward     Driver    Page
+  (triage)   (enrichment)    (IR)    (intel)   (reports)
+                                                  |
+                                                Wells
+                                              (log query)
 ```
 
-## Agents
+## The Team
 
-| Agent | Pillar | Model | Purpose |
-|-------|--------|-------|---------|
-| **coordinator** | -- | gpt-4.1 | Routes requests, chains workflows, handles simple queries |
-| **triage-analyst** | Hunting | gpt-4.1 | Alert triage: TP/FP/Suspicious/Escalate verdicts |
-| **osint-researcher** | Hunting | gpt-4.1 | IOC enrichment via VirusTotal, Censys, AbuseIPDB |
-| **incident-responder** | Orchestration | gpt-5 | NIST 800-61 IR guidance with platform-specific steps |
-| **threat-intel** | Operational Knowledge | gpt-5 | Structured analytic techniques (ACH, Key Assumptions) |
-| **report-writer** | Operational Knowledge | gpt-4.1 | Audience-adapted reports (analyst to board level) |
-| **log-querier** | Data | gpt-4.1 | Natural language log queries via OpenSearch (Phase 6) |
+| Callsign | Agent ID | Model | Role |
+|----------|----------|-------|------|
+| **Marshall** | coordinator | gpt-4.1 | Action officer. Routes requests, chains workflows, briefs back. Calm, dry, decisive. |
+| **Tara** | triage-analyst | gpt-4.1 | Alert triage. TP/FP/Suspicious/Escalate verdicts with ATT&CK mapping. Clinical, precise. |
+| **Hunter** | osint-researcher | gpt-4.1 | IOC enrichment across 8 sources. Follows infrastructure threads past where most stop. |
+| **Ward** | incident-responder | gpt-4.1 | NIST 800-61 IR guidance. Contain first, understand later. Framework-driven. |
+| **Driver** | threat-intel | gpt-5 | Structured analysis (ACH, Key Assumptions). Opinionated, comfortable making assumptions. |
+| **Page** | report-writer | gpt-5 | Intelligence writer. Audience-calibrated reports with timelines, impact, detection gaps. |
+| **Wells** | log-querier | gpt-4.1 | Translates natural language to OpenSearch DSL. Returns what the data shows. |
+
+## Enrichment Sources
+
+Hunter queries 8 sources for IP enrichment, 6 for domains, and 3 for hashes:
+
+| Source | IP | Domain | Hash | Key Required |
+|--------|:--:|:------:|:----:|:------------:|
+| VirusTotal | x | x | x | VT_API_KEY |
+| AbuseIPDB | x | | | ABUSEIPDB_API_KEY |
+| Censys | x | | | CENSYS_API_ID/SECRET |
+| AlienVault OTX | x | x | x | OTX_API_KEY |
+| Shodan | x | | | SHODAN_API_KEY |
+| URLhaus | x | x | | None |
+| ThreatFox | x | x | x | None |
+| DNS/WHOIS | x | x | | None |
+
+Single-source queries are supported:
+```bash
+enrich-ip.sh --source shodan 1.2.3.4
+enrich-ip.sh --source otx,urlhaus 1.2.3.4
+enrich-domain.sh --source threatfox evil.com
+```
 
 ## Quick Start
 
-1. Clone this repo
-2. Run `./install/setup.sh` (automated) or follow `install/INSTALL.md` (manual)
-3. Configure Slack app (see Step 5 in `install/INSTALL.md`)
-4. Start OpenClaw: `openclaw gateway install && openclaw gateway start`
-5. Validate: `./scripts/health-check.sh && ./scripts/validate-config.sh`
-6. Test in Slack: `@HOOK Hello`
-7. Smoke test: `./tests/run-frozen-ledger.sh`
+```bash
+# 1. Install dependencies
+npm install -g openclaw
+brew install jq bind nmap whois
+pip3 install -r requirements.txt  # or use .venv
 
-Full installation guide: [install/INSTALL.md](install/INSTALL.md)
+# 2. Install Ollama (local embeddings)
+brew install ollama
+brew services start ollama
+ollama pull nomic-embed-text
+ollama pull qwen2.5:14b
+
+# 3. Configure
+cp config/openclaw.json.template ~/.openclaw/openclaw.json
+# Edit with your API keys, workspace paths, and gateway auth token
+
+# 4. Set up .env
+cp .env.example .env  # Add all API keys
+
+# 5. Start services
+openclaw gateway install && openclaw gateway start
+./scripts/restart.sh all
+
+# 6. Open Shadowbox
+open http://localhost:7799
+# Default login: admin / shadowbox
+```
+
+## Shadowbox Web UI
+
+The web interface provides:
+
+- **Investigate** — Chat with the agent team. Submit alerts, IOCs, or questions. Marshall routes to the right specialist. Direct agent routing dropdown available.
+- **Agents** — Live status of all 7 agents with message counts, token usage, and cost tracking.
+- **History** — Investigation lifecycle management. View findings, timelines, IOCs. Change status, add notes, link to conversations.
+- **Feeds** — Threat feed status and IOC watchlist. Watch IOCs for risk changes with automatic re-enrichment every 4 hours.
+- **Settings** — Health dashboard with service status for Gateway, Ollama, RAG, API keys, feeds, and database.
+- **Audit** — Full audit log of agent calls with user, model, tokens, duration, and cost (admin only).
+- **Users** — User management with role-based access: admin and analyst (admin only).
+
+Features:
+- Real-time chain progress bar with elapsed timers per agent
+- Smart fast-routing (simple enrichments skip Marshall)
+- Multi-turn conversation continuity
+- Per-user conversation isolation with read-only and collaborate sharing
+- Notification bell with watchlist alerts and auto-created investigations
+- Orange/black SOC theme
+
+## RAG Behavioral Memory
+
+Agents have access to behavioral memory powered by Ollama (nomic-embed-text) embeddings:
+
+- **IOC verdicts** — Past enrichment results recalled before re-enriching
+- **Threat feed IOCs** — Auto-ingested from Feodo, URLhaus, ThreatFox feeds
+- **TTPs** — Historical technique observations for attribution analysis
+- **Findings** — Cross-investigation recall of past findings
+
+Feed-to-RAG pipeline runs automatically: `fetch-feeds.sh` pulls IOCs, `feed-to-rag.py` stores them with semantic embeddings, and the bridge auto-injects feed matches into specialist context.
+
+## Automation
+
+macOS LaunchAgents (auto-start on boot):
+
+| Service | Schedule | Purpose |
+|---------|----------|---------|
+| Shadowbox Web | Always (KeepAlive) | Web UI on port 7799 |
+| OpenClaw Gateway | Always (KeepAlive) | Agent runtime on port 18789 |
+| Daily Check | 6:00 AM | Fetch feeds, enrich new IOCs, check watchlist |
+| Watch Check | Every 4 hours | Re-enrich watched IOCs, detect risk changes |
+
+```bash
+./scripts/restart.sh status  # Show all service status
+./scripts/restart.sh all     # Restart everything
+./scripts/restart.sh web     # Restart web only
+```
 
 ## Requirements
 
-- [OpenClaw](https://github.com/openclaw/openclaw) installed
-- macOS with Homebrew (security tools: `brew install jq bind nmap whois`)
-- OpenAI API key (GPT-4.1 + GPT-5)
-- VirusTotal API key (free tier)
-- Censys API credentials (free tier)
-- AbuseIPDB API key (free tier)
-- Slack workspace with app creation access
+- macOS with Apple Silicon (tested on M4 Max)
+- [OpenClaw](https://github.com/openclaw/openclaw) via npm
+- [Ollama](https://ollama.ai) with nomic-embed-text + qwen2.5:14b
+- Node.js 22+, Python 3.14+
+- OpenAI API key (gpt-4.1 + gpt-5)
+- Enrichment API keys: VirusTotal, Censys, AbuseIPDB, AlienVault OTX, Shodan (all free tier)
 
 ## Repository Structure
 
 ```
 hook/
 +-- README.md
-+-- INSTALL.md                  # Redirect to install/INSTALL.md
-+-- requirements.txt            # Python dependencies (Phase 6)
-+-- .gitignore
-+-- core/                       # Phase 6: Backend modules
-|   +-- db/
-|   |   +-- connector.py       # BaseDBConnector ABC + OpenSearchConnector
-|   |   +-- querier.py         # NL -> OpenSearch DSL translator
-|   +-- rag/
-|       +-- engine.py          # RAG engine (OpenSearch k-NN + FAISS fallback)
-|       +-- memory.py          # Behavioral memory (IOC verdicts, baselines, TTPs)
-|       +-- baseliner.py       # 6-hourly baseline builder
-+-- web/                        # Phase 6: Web UI
++-- requirements.txt
++-- .env                        # API keys (gitignored)
++-- core/
+|   +-- db/                    # Database connectors (OpenSearch)
+|   +-- rag/                   # RAG engine, behavioral memory, baseliner
+|   +-- llm/                   # Ollama provider
++-- web/
 |   +-- api/
-|   |   +-- server.py          # FastAPI app (port 7799)
-|   |   +-- gateway_bridge.py  # OpenClaw gateway REST API bridge
+|   |   +-- server.py          # FastAPI app
+|   |   +-- gateway_bridge.py  # OpenClaw CLI bridge with chain detection
+|   |   +-- auth.py            # User auth + sessions
+|   |   +-- watchlist.py       # IOC watchlist + notifications
 |   |   +-- sse.py             # SSE event formatting
-|   +-- src/                   # React + Vite frontend
-|   |   +-- pages/             # InvestigatePage, AgentsPage, etc.
-|   |   +-- components/        # Layout, AgentBadge, InvestigationTimeline
-|   |   +-- lib/api.js         # SSE streaming + REST client
-|   +-- package.json
-|   +-- vite.config.js
-|   +-- tailwind.config.js
-+-- docs/
-|   +-- RESEARCH-INTER-AGENT-ROUTING.md
-|   +-- PIPELINES.md            # Lobster pipeline documentation
-|   +-- PHASE5-CHECKLIST.md     # Config stabilization results
-|   +-- skills/                 # Reference docs (human-readable)
-+-- workspaces/                 # Agent workspaces (SOUL.md + TOOLS.md)
-|   +-- coordinator/
-|   +-- triage-analyst/
-|   +-- osint-researcher/
-|   +-- incident-responder/
-|   +-- threat-intel/
-|   +-- report-writer/
-|   +-- log-querier/            # Phase 6: NL log query agent
-+-- pipelines/                  # Lobster workflow definitions
-|   +-- ioc-enrich-ip.yaml
-|   +-- ioc-enrich-domain.yaml
-|   +-- alert-to-report.yaml
-|   +-- batch-ioc-check.yaml
-+-- scripts/                    # Pipeline helper scripts (hardened)
-|   +-- lib/
-|   |   +-- common.py          # Shared validation, rate limiting, logging
-|   |   +-- slack-notify.sh    # Post messages to Slack from scripts
-|   +-- enrich-ip.sh
-|   +-- enrich-domain.sh
-|   +-- enrich-hash.sh
-|   +-- extract-iocs.sh
-|   +-- enrich-batch.sh
-|   +-- format-report.sh
-|   +-- health-check.sh        # Environment validation
-|   +-- validate-config.sh     # Config structure/drift validation
-|   +-- rag-inject.py          # Phase 6: RAG CLI for agents
-|   +-- run-baseliner.py       # Phase 6: Baseliner entry point
-|   +-- query-logs.py          # Phase 6: Log query entry point
-|   +-- start-web.sh           # Phase 6: Web UI launcher
-|   +-- fetch-feeds.sh         # Pull IOCs from threat feeds
-|   +-- watchlist.sh           # Persistent IOC watchlist manager
-|   +-- daily-check.sh         # Automated daily threat check (cron)
-|   +-- morning-briefing.sh    # Morning Slack summary
-|   +-- schedule-install.sh    # Install/uninstall macOS LaunchAgents
-+-- data/                       # Dynamic data (gitignored)
-|   +-- feeds/                 # Downloaded threat feed IOCs
-|   +-- reports/               # Daily enrichment reports
-|   +-- faiss/                 # Phase 6: FAISS vector index (gitignored)
-|   +-- watchlist.txt          # Persistent IOC watchlist
-+-- config/
-|   +-- openclaw.json.template # Config template with placeholders
-|   +-- USER.md.template
-|   +-- Dockerfile.hook        # Custom image (future Docker sandboxing)
-|   +-- build.sh               # Build script for custom image
-|   +-- ai.openclaw.hook-daily.plist      # LaunchAgent: daily threat check
-|   +-- ai.openclaw.hook-briefing.plist   # LaunchAgent: morning briefing
-|   +-- com.punchcyber.hook.web.plist     # Phase 6: Web server LaunchAgent
-|   +-- com.punchcyber.hook.baseliner.plist # Phase 6: Baseliner LaunchAgent
-+-- tests/
-|   +-- mocks/                  # Phase 6: Test infrastructure
-|   |   +-- mock_db.py         # In-memory DB with cosine kNN
-|   |   +-- mock_llm.py        # Deterministic LLM
-|   |   +-- data_generator.py  # Synthetic test data
-|   +-- test_mocks.py          # Phase 6: Mock tests
-|   +-- test_rag.py            # Phase 6: RAG engine tests
-|   +-- test_web_api.py        # Phase 6: Web API tests
-|   +-- scenarios/
-|   |   +-- operation-frozen-ledger.md  # Smoke test scenario
-|   +-- run-frozen-ledger.sh            # Test runner (print/post/log)
-|   +-- results/                        # Test results (gitignored)
-|   +-- ioc-lists/                      # Test IOC data
-+-- install/
-    +-- INSTALL.md              # Comprehensive installation guide
-    +-- setup.sh                # Automated setup script
+|   +-- src/                   # React + Vite + Tailwind frontend
++-- workspaces/                # Agent workspaces
+|   +-- coordinator/           # Marshall
+|   +-- triage-analyst/        # Tara
+|   +-- osint-researcher/      # Hunter
+|   +-- incident-responder/    # Ward
+|   +-- threat-intel/          # Driver
+|   +-- report-writer/         # Page
+|   +-- log-querier/           # Wells
++-- scripts/
+|   +-- lib/common.py          # Shared validation, rate limiting, caching
+|   +-- enrich-ip.sh           # 8-source IP enrichment
+|   +-- enrich-domain.sh       # 6-source domain enrichment
+|   +-- enrich-hash.sh         # 3-source hash enrichment
+|   +-- rag-inject.py          # RAG CLI (store/recall)
+|   +-- feed-to-rag.py         # Feed IOC ingestion
+|   +-- watch-check.py         # Watchlist re-enrichment
+|   +-- fetch-feeds.sh         # Threat feed downloader
+|   +-- restart.sh             # Service management
+|   +-- test-agent.sh          # Agent testing helper
+|   +-- backup-agents.sh       # SOUL.md/TOOLS.md backup
++-- data/                      # Runtime data (gitignored)
++-- config/                    # Config templates + LaunchAgent plists
++-- tests/                     # Mocks, unit tests, scenarios
++-- install/                   # Installation guide + setup script
 ```
-
-## Inter-Agent Routing
-
-HOOK uses OpenClaw's `sessions_spawn` for inter-agent communication. The coordinator agent receives all Slack messages and delegates to specialists:
-
-```
-User: "Enrich 45.77.65.211"
-  -> Coordinator: sessions_spawn(agentId: "osint-researcher", task: "Enrich IP 45.77.65.211...")
-  -> OSINT Researcher: runs VT + Censys + AbuseIPDB
-  -> Result announced back to Slack
-```
-
-For multi-step investigations, the coordinator chains agents sequentially, passing accumulated findings between each step:
-
-```
-User: "Investigate this alert fully"
-  -> Coordinator spawns triage-analyst
-  -> Triage result announces back
-  -> Coordinator spawns osint-researcher with triage findings
-  -> OSINT result announces back
-  -> Coordinator spawns report-writer with all findings
-  -> Final report announces back to Slack
-```
-
-See [docs/RESEARCH-INTER-AGENT-ROUTING.md](docs/RESEARCH-INTER-AGENT-ROUTING.md) for the full research on routing mechanisms.
-
-## Test Scenarios
-
-**Operation Frozen Ledger** — Full attack chain: phishing, execution, C2, credential dump, lateral movement, ransomware. Tests all six agents individually and as a chained workflow.
-
-```bash
-# Print test prompts for manual Slack testing
-./tests/run-frozen-ledger.sh
-
-# Post prompts directly to Slack (interactive, waits between tests)
-./tests/run-frozen-ledger.sh --post
-
-# Generate results capture template
-./tests/run-frozen-ledger.sh --log
-```
-
-See [tests/scenarios/operation-frozen-ledger.md](tests/scenarios/operation-frozen-ledger.md) for full scenario details and expected behaviors.
-
-## Validation
-
-```bash
-# Environment: dependencies, tools, API connectivity, workspaces
-./scripts/health-check.sh
-
-# Config: structure, placeholders, agents, bindings, schema pitfalls
-./scripts/validate-config.sh
-```
-
-## Automation
-
-HOOK includes cron-driven automation via macOS LaunchAgents:
-
-- **Daily threat check** (6 AM): fetches threat feeds, checks watchlist IOCs, posts results to Slack
-- **Morning briefing** (8 AM): summarizes overnight feed activity and watchlist hits
-
-Install with: `./scripts/schedule-install.sh --install`
-
-## Web UI (Phase 6)
-
-HOOK includes a web interface alongside the Slack interface. Both operate simultaneously.
-
-```bash
-# Development mode (API + Vite dev server)
-./scripts/start-web.sh
-
-# Production (build frontend, then serve)
-./scripts/start-web.sh --build
-./scripts/start-web.sh --api
-```
-
-- **API**: FastAPI on port 7799 (bridges to OpenClaw gateway)
-- **Frontend**: React + Vite on port 5173 (dev) or bundled to `web/dist/`
-- **Views**: Investigate (chat), Agents (status), Investigations (history), Feeds, Settings
-
-## RAG Behavioral Memory (Phase 6)
-
-Agents have access to behavioral memory via RAG:
-- **IOC verdicts**: Past enrichment results recalled before re-enriching
-- **Baselines**: Network behavioral baselines for triage context
-- **TTPs**: Historical technique observations for ACH analysis
-- **Findings**: Cross-investigation recall of past findings
-
-Agents interact via `exec: python3 $HOOK_DIR/scripts/rag-inject.py`. Baseliner runs every 6 hours via LaunchAgent.
 
 ## Phase History
 
-| Phase | Name | Milestone |
-|-------|------|-----------|
-| 1 | CLINCH | Prototype, proved the concept |
-| 2 | HOOK | Production rebuild, 6 agents, Slack integration, enrichment APIs |
-| 3 | HOOK | Coordinator routing overhaul, native tools, session memory, Lobster pipelines |
-| 4 | HOOK | Production hardening: input validation, rate limiting, structured logging, cron automation, install docs |
-| 5 | HOOK | Config stabilization, channel standardization, config validation tooling, Frozen Ledger test runner, all 6 tests passing |
-| 6 | HOOK | Web UI (FastAPI + React), RAG behavioral memory, log-querier agent, direct OpenSearch connectivity, test mocks |
+| Phase | Milestone |
+|-------|-----------|
+| 1 | CLINCH — Prototype, proved the concept |
+| 2 | HOOK — Production rebuild, 6 agents, Slack integration, enrichment APIs |
+| 3 | Coordinator routing overhaul, native tools, session memory, Lobster pipelines |
+| 4 | Production hardening: input validation, rate limiting, structured logging, cron |
+| 5 | Config stabilization, validation tooling, Frozen Ledger test suite |
+| 6 | Shadowbox web UI, RAG memory, 7th agent, Ollama, multi-user auth, 8-source enrichment, watchlist monitoring, notification system, audit log, investigation lifecycle |
 
 ## License
 
