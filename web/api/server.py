@@ -558,6 +558,151 @@ def create_app() -> FastAPI:
 
     # -- Endpoints --
 
+    @app.get("/api/dashboard")
+    async def dashboard(request: Request) -> dict[str, Any]:
+        """Dashboard metrics for the overview page."""
+        user = get_current_user(request)
+        web_db: WebSessionDB = app.state.web_db
+        tracker_inst: AgentTracker = app.state.tracker
+        wl: WatchlistDB = app.state.watchlist
+
+        # Investigations
+        inv_count = 0
+        inv_active = 0
+        if INVESTIGATIONS_DIR.exists():
+            for inv_dir in INVESTIGATIONS_DIR.iterdir():
+                if inv_dir.is_dir():
+                    inv_count += 1
+                    state_file = inv_dir / "state.json"
+                    if state_file.exists():
+                        try:
+                            state = json.loads(state_file.read_text())
+                            if state.get("status") == "active":
+                                inv_active += 1
+                        except Exception:
+                            pass
+
+        # Conversations
+        user_filter = None if user["role"] == "admin" else user["username"]
+        conversations = web_db.list_conversations(user_id=user_filter)
+
+        # Token usage by agent
+        agent_stats = tracker_inst.get_agent_stats()
+        totals = tracker_inst.get_totals()
+
+        # Usage over time (last 7 days)
+        daily_usage = []
+        try:
+            rows = tracker_inst._conn.execute(
+                "SELECT DATE(timestamp) as day, SUM(tokens_total) as tokens, SUM(cost_usd) as cost, COUNT(*) as calls "
+                "FROM token_usage WHERE timestamp > datetime('now', '-7 days') GROUP BY DATE(timestamp) ORDER BY day"
+            ).fetchall()
+            daily_usage = [{"date": r[0], "tokens": r[1] or 0, "cost": round(r[2] or 0, 4), "calls": r[3]} for r in rows]
+        except Exception:
+            pass
+
+        # IOC risk distribution from enrichment cache
+        risk_dist = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}
+        cache_dir = DATA_DIR / "cache"
+        if cache_dir.exists():
+            for subdir in cache_dir.iterdir():
+                if subdir.is_dir():
+                    for f in subdir.glob("*.json"):
+                        try:
+                            d = json.loads(f.read_text())
+                            risk = d.get("risk", "UNKNOWN")
+                            risk_dist[risk] = risk_dist.get(risk, 0) + 1
+                        except Exception:
+                            pass
+
+        # Watched IOCs
+        watched = wl.list_watched(user_id=user["username"])
+        unread = wl.unread_count(user["username"])
+
+        # Recent investigations (last 5)
+        recent_investigations = []
+        if INVESTIGATIONS_DIR.exists():
+            for inv_dir in sorted(INVESTIGATIONS_DIR.iterdir(), reverse=True)[:5]:
+                state_file = inv_dir / "state.json"
+                if state_file.exists():
+                    try:
+                        state = json.loads(state_file.read_text())
+                        recent_investigations.append({
+                            "id": state.get("id"),
+                            "title": state.get("title", "")[:80],
+                            "status": state.get("status"),
+                            "finding_count": len(state.get("findings", [])),
+                            "created_at": state.get("created_at"),
+                        })
+                    except Exception:
+                        pass
+
+        # CISA KEV (fetch cached or live)
+        kev_data = await _get_cisa_kev()
+
+        return {
+            "investigations": {"total": inv_count, "active": inv_active},
+            "conversations": len(conversations),
+            "watched_iocs": len(watched),
+            "unread_notifications": unread,
+            "totals": totals,
+            "agent_stats": agent_stats,
+            "daily_usage": daily_usage,
+            "risk_distribution": risk_dist,
+            "recent_investigations": recent_investigations,
+            "cisa_kev": kev_data,
+        }
+
+    async def _get_cisa_kev() -> dict[str, Any]:
+        """Fetch CISA Known Exploited Vulnerabilities (cached 6 hours)."""
+        cache_file = DATA_DIR / "cisa-kev-cache.json"
+        now = datetime.now(timezone.utc)
+
+        # Check cache
+        if cache_file.exists():
+            try:
+                cached = json.loads(cache_file.read_text())
+                cached_at = datetime.fromisoformat(cached.get("cached_at", "2000-01-01"))
+                if (now - cached_at).total_seconds() < 21600:  # 6 hours
+                    return cached
+            except Exception:
+                pass
+
+        # Fetch fresh
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+                headers={"User-Agent": "Shadowbox/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+                vulns = data.get("vulnerabilities", [])
+                # Get recent (last 30 days)
+                recent = []
+                cutoff = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+                for v in vulns:
+                    if v.get("dateAdded", "") >= cutoff:
+                        recent.append({
+                            "cve": v.get("cveID"),
+                            "vendor": v.get("vendorProject"),
+                            "product": v.get("product"),
+                            "name": v.get("vulnerabilityName", "")[:100],
+                            "date_added": v.get("dateAdded"),
+                            "due_date": v.get("dueDate"),
+                        })
+                result = {
+                    "total_kevs": len(vulns),
+                    "recent_30d": recent[:15],
+                    "recent_count": len(recent),
+                    "cached_at": now.isoformat(),
+                }
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
+                cache_file.write_text(json.dumps(result))
+                return result
+        except Exception as exc:
+            return {"total_kevs": 0, "recent_30d": [], "recent_count": 0, "error": str(exc)}
+
     @app.get("/api/status")
     async def status() -> dict[str, Any]:
         gw_health = await app.state.bridge.health_check()
@@ -1090,24 +1235,91 @@ Respond to the operator's latest message. Use the conversation context to resolv
                 })
         return {"items": items}
 
+    FEED_META = {
+        "feodo": {
+            "source": "Feodo Tracker",
+            "provider": "abuse.ch",
+            "url": "https://feodotracker.abuse.ch",
+            "description": "Botnet C2 server IPs (Dridex, Emotet, TrickBot, QakBot)",
+            "ioc_type": "ip",
+            "category": "c2",
+        },
+        "urlhaus": {
+            "source": "URLhaus",
+            "provider": "abuse.ch",
+            "url": "https://urlhaus.abuse.ch",
+            "description": "Malware distribution URLs and domains",
+            "ioc_type": "domain",
+            "category": "malware_distribution",
+        },
+        "threatfox": {
+            "source": "ThreatFox",
+            "provider": "abuse.ch",
+            "url": "https://threatfox.abuse.ch",
+            "description": "Crowd-sourced IOCs linked to malware families",
+            "ioc_type": "mixed",
+            "category": "malware_iocs",
+        },
+        "combined": {
+            "source": "Combined Feed",
+            "provider": "Shadowbox",
+            "url": "",
+            "description": "Deduplicated merge of all feed sources",
+            "ioc_type": "mixed",
+            "category": "combined",
+        },
+    }
+
     @app.get("/api/feeds")
     async def feeds() -> dict[str, Any]:
-        """Return threat feed status."""
+        """Return threat feed status with source context."""
         feeds_dir = DATA_DIR / "feeds"
         watchlist_file = DATA_DIR / "watchlist.txt"
 
         feed_files = []
+        total_iocs = 0
+        ioc_breakdown = {"ip": 0, "domain": 0, "hash": 0, "other": 0}
+
         if feeds_dir.exists():
-            for f in sorted(feeds_dir.iterdir()):
-                if f.is_file():
-                    stat = f.stat()
-                    feed_files.append({
-                        "name": f.name,
-                        "size_bytes": stat.st_size,
-                        "last_modified": datetime.fromtimestamp(
-                            stat.st_mtime, tz=timezone.utc
-                        ).isoformat(),
-                    })
+            import re as _re
+            ip_re = _re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
+            hash_re = _re.compile(r'^[a-fA-F0-9]{32,64}$')
+
+            for f in sorted(feeds_dir.iterdir(), reverse=True):
+                if not f.is_file():
+                    continue
+                stat = f.stat()
+                # Count IOCs in file
+                lines = []
+                try:
+                    lines = [l.strip() for l in f.read_text().splitlines() if l.strip() and not l.startswith("#")]
+                except Exception:
+                    pass
+                ioc_count = len(lines)
+
+                # Classify IOCs
+                ip_count = sum(1 for l in lines if ip_re.match(l))
+                hash_count = sum(1 for l in lines if hash_re.match(l))
+                domain_count = ioc_count - ip_count - hash_count
+
+                # Match feed metadata
+                prefix = f.stem.rsplit("-", 3)[0] if "-" in f.stem else f.stem
+                meta = FEED_META.get(prefix, {"source": prefix, "provider": "unknown", "url": "", "description": "", "ioc_type": "mixed", "category": "unknown"})
+
+                feed_files.append({
+                    "name": f.name,
+                    "size_bytes": stat.st_size,
+                    "last_modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    "ioc_count": ioc_count,
+                    "breakdown": {"ip": ip_count, "domain": domain_count, "hash": hash_count},
+                    **meta,
+                })
+
+                if prefix != "combined":
+                    total_iocs += ioc_count
+                    ioc_breakdown["ip"] += ip_count
+                    ioc_breakdown["domain"] += domain_count
+                    ioc_breakdown["hash"] += hash_count
 
         watchlist_count = 0
         if watchlist_file.exists():
@@ -1119,6 +1331,8 @@ Respond to the operator's latest message. Use the conversation context to resolv
         return {
             "feeds": feed_files,
             "watchlist_count": watchlist_count,
+            "total_iocs": total_iocs,
+            "ioc_breakdown": ioc_breakdown,
         }
 
     @app.get("/api/config")

@@ -1,10 +1,11 @@
 import { NavLink } from 'react-router-dom'
-import { Activity, Bot, ClipboardList, FileText, LogOut, Rss, Settings, Shield, Users } from 'lucide-react'
+import { Activity, Bot, ClipboardList, FileText, LayoutDashboard, LogOut, Rss, Settings, Shield, Users } from 'lucide-react'
 import { logout } from '../lib/api.js'
 import NotificationBell from './NotificationBell.jsx'
 
 export default function Layout({ children, user, onLogout }) {
   const links = [
+    { to: '/dashboard', label: 'DASHBOARD', icon: LayoutDashboard },
     { to: '/investigate', label: 'INVESTIGATE', icon: Bot },
     { to: '/agents', label: 'AGENTS', icon: Activity },
     { to: '/investigations', label: 'HISTORY', icon: FileText },

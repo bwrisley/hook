@@ -10,6 +10,7 @@ import FeedsPage from './pages/FeedsPage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
 import AdminPage from './pages/AdminPage.jsx'
 import AuditPage from './pages/AuditPage.jsx'
+import DashboardPage from './pages/DashboardPage.jsx'
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -34,7 +35,8 @@ export default function App() {
   return (
     <Layout user={user} onLogout={() => setUser(null)}>
       <Routes>
-        <Route path="/" element={<Navigate to="/investigate" replace />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/investigate" element={<InvestigatePage />} />
         <Route path="/investigate/:conversationId" element={<InvestigatePage />} />
         <Route path="/agents" element={<AgentsPage />} />
