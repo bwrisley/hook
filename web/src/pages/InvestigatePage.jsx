@@ -71,12 +71,21 @@ export default function InvestigatePage() {
 
   useEffect(() => { loadConversations(true) }, [])
 
+  // Load messages on mount and when conversation changes
   useEffect(() => {
-    // Always load messages when activeId changes (component mount or nav)
-    // Only skip if THIS component instance is actively streaming
-    if (!isStreamingRef.current) {
-      loadMessages(activeId)
-    }
+    loadMessages(activeId)
+  }, [activeId])
+
+  // Poll for new messages every 5 seconds when viewing a conversation
+  // This catches results that arrived while the user was on another tab
+  useEffect(() => {
+    if (!activeId) return
+    const interval = setInterval(() => {
+      if (!isStreamingRef.current) {
+        loadMessages(activeId)
+      }
+    }, 5000)
+    return () => clearInterval(interval)
   }, [activeId])
 
   const newChat = () => {
