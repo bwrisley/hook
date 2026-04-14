@@ -114,62 +114,8 @@ export default function FeedsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Feed Sources */}
-        <div className="panel lg:col-span-2">
-          <div className="border-b border-border px-5 py-3 font-mono text-xs uppercase tracking-[0.18em] text-accent">
-            Threat Intelligence Sources
-          </div>
-          <div className="p-4">
-            {sourceFeed.length === 0 ? (
-              <div className="font-mono text-sm text-dim">No feed data. Run ./scripts/fetch-feeds.sh</div>
-            ) : (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                {sourceFeed.map((feed) => (
-                  <div key={feed.name} className="rounded-lg border border-border bg-panel2 p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-mono text-xs font-bold text-text">{feed.source}</span>
-                      <span className={`badge text-[9px] ${categoryBadge[feed.category] || 'badge-dim'}`}>
-                        {categoryLabels[feed.category] || feed.category}
-                      </span>
-                    </div>
-                    <div className="text-xs text-dim mb-3">{feed.description}</div>
-                    <div className="space-y-1">
-                      <div className="kv">
-                        <span className="font-mono text-[10px] text-dim">Provider</span>
-                        <span className="font-mono text-[10px] text-text">{feed.provider}</span>
-                      </div>
-                      <div className="kv">
-                        <span className="font-mono text-[10px] text-dim">IOCs</span>
-                        <span className="font-mono text-[10px] text-text">{feed.ioc_count}</span>
-                      </div>
-                      <div className="kv">
-                        <span className="font-mono text-[10px] text-dim">Breakdown</span>
-                        <span className="font-mono text-[10px] text-text">
-                          {feed.breakdown?.ip > 0 && `${feed.breakdown.ip} IPs`}
-                          {feed.breakdown?.domain > 0 && ` ${feed.breakdown.domain} domains`}
-                          {feed.breakdown?.hash > 0 && ` ${feed.breakdown.hash} hashes`}
-                        </span>
-                      </div>
-                      <div className="kv">
-                        <span className="font-mono text-[10px] text-dim">Updated</span>
-                        <span className="font-mono text-[10px] text-text">{timeAgo(feed.last_modified)}</span>
-                      </div>
-                    </div>
-                    {feed.url && (
-                      <a href={feed.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 font-mono text-[10px] text-accent hover:underline">
-                        <ExternalLink className="h-3 w-3" /> Source
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* IOC Watchlist */}
-        <div className="panel lg:col-span-2">
+      {/* IOC Watchlist — moved to top */}
+      <div className="mb-6 panel">
           <div className="flex items-center justify-between border-b border-border px-5 py-3">
             <span className="font-mono text-xs uppercase tracking-[0.18em] text-accent">
               IOC Watchlist ({watched.length})
@@ -238,7 +184,62 @@ export default function FeedsPage() {
               </div>
             )}
           </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Feed Sources */}
+        <div className="panel lg:col-span-2">
+          <div className="border-b border-border px-5 py-3 font-mono text-xs uppercase tracking-[0.18em] text-accent">
+            Threat Intelligence Sources
+          </div>
+          <div className="p-4">
+            {sourceFeed.length === 0 ? (
+              <div className="font-mono text-sm text-dim">No feed data. Run ./scripts/fetch-feeds.sh</div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                {sourceFeed.map((feed) => (
+                  <div key={feed.name} className="rounded-lg border border-border bg-panel2 p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-mono text-xs font-bold text-text">{feed.source}</span>
+                      <span className={`badge text-[9px] ${categoryBadge[feed.category] || 'badge-dim'}`}>
+                        {categoryLabels[feed.category] || feed.category}
+                      </span>
+                    </div>
+                    <div className="text-xs text-dim mb-3">{feed.description}</div>
+                    <div className="space-y-1">
+                      <div className="kv">
+                        <span className="font-mono text-[10px] text-dim">Provider</span>
+                        <span className="font-mono text-[10px] text-text">{feed.provider}</span>
+                      </div>
+                      <div className="kv">
+                        <span className="font-mono text-[10px] text-dim">IOCs</span>
+                        <span className="font-mono text-[10px] text-text">{feed.ioc_count}</span>
+                      </div>
+                      <div className="kv">
+                        <span className="font-mono text-[10px] text-dim">Breakdown</span>
+                        <span className="font-mono text-[10px] text-text">
+                          {feed.breakdown?.ip > 0 && `${feed.breakdown.ip} IPs`}
+                          {feed.breakdown?.domain > 0 && ` ${feed.breakdown.domain} domains`}
+                          {feed.breakdown?.hash > 0 && ` ${feed.breakdown.hash} hashes`}
+                        </span>
+                      </div>
+                      <div className="kv">
+                        <span className="font-mono text-[10px] text-dim">Updated</span>
+                        <span className="font-mono text-[10px] text-text">{timeAgo(feed.last_modified)}</span>
+                      </div>
+                    </div>
+                    {feed.url && (
+                      <a href={feed.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 font-mono text-[10px] text-accent hover:underline">
+                        <ExternalLink className="h-3 w-3" /> Source
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
+
       </div>
     </div>
   )

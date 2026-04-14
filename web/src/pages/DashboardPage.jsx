@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, Eye, FileText, Shield, TrendingUp } from 'lucide-react'
+import { Eye, FileText, Shield, TrendingUp } from 'lucide-react'
 import { api, AGENT_LABELS } from '../lib/api.js'
 
 function formatTokens(n) {
@@ -173,51 +173,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* CISA KEV */}
-        <div className="panel p-5 lg:col-span-2">
-          <div className="mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-danger" />
-              <span className="font-mono text-xs uppercase tracking-[0.16em] text-accent">
-                CISA Known Exploited Vulnerabilities
-              </span>
-            </div>
-            <div className="flex gap-4 font-mono text-[10px] text-dim">
-              <span>{data.cisa_kev?.total_kevs || 0} total KEVs</span>
-              <span>{data.cisa_kev?.recent_count || 0} added last 30 days</span>
-            </div>
-          </div>
-          {(data.cisa_kev?.recent_30d || []).length === 0 ? (
-            <div className="font-mono text-xs text-dim">No recent KEVs or unable to fetch CISA feed</div>
-          ) : (
-            <div className="overflow-auto max-h-60">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-panel">
-                  <tr className="border-b border-border">
-                    <th className="px-3 py-1 text-left font-mono text-[10px] uppercase text-dim">CVE</th>
-                    <th className="px-3 py-1 text-left font-mono text-[10px] uppercase text-dim">Vendor</th>
-                    <th className="px-3 py-1 text-left font-mono text-[10px] uppercase text-dim">Product</th>
-                    <th className="px-3 py-1 text-left font-mono text-[10px] uppercase text-dim">Vulnerability</th>
-                    <th className="px-3 py-1 text-left font-mono text-[10px] uppercase text-dim">Added</th>
-                    <th className="px-3 py-1 text-left font-mono text-[10px] uppercase text-dim">Due</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {data.cisa_kev.recent_30d.map((v) => (
-                    <tr key={v.cve} className="hover:bg-panel2">
-                      <td className="px-3 py-1.5 font-mono text-[11px] text-danger">{v.cve}</td>
-                      <td className="px-3 py-1.5 font-mono text-[11px] text-text">{v.vendor}</td>
-                      <td className="px-3 py-1.5 font-mono text-[11px] text-text">{v.product}</td>
-                      <td className="px-3 py-1.5 text-xs text-dim line-clamp-1">{v.name}</td>
-                      <td className="px-3 py-1.5 font-mono text-[10px] text-dim">{v.date_added}</td>
-                      <td className="px-3 py-1.5 font-mono text-[10px] text-amber">{v.due_date}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   )
