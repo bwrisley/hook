@@ -72,9 +72,9 @@ export default function InvestigatePage() {
   useEffect(() => { loadConversations(true) }, [])
 
   useEffect(() => {
-    // Don't reload messages if we're actively streaming — the messages
-    // are being built live in state and a reload would wipe them
-    if (!isStreamingRef.current && !busy) {
+    // Always load messages when activeId changes (component mount or nav)
+    // Only skip if THIS component instance is actively streaming
+    if (!isStreamingRef.current) {
       loadMessages(activeId)
     }
   }, [activeId])
@@ -239,6 +239,11 @@ export default function InvestigatePage() {
       setActiveAgent(null)
       setChainProgress([])
       loadConversations()
+      // Reload from DB to pick up any messages persisted during stream
+      const cid = conversationIdRef.current || activeId
+      if (cid) {
+        loadMessages(cid)
+      }
     }
   }
 
