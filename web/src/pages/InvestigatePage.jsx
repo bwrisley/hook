@@ -34,12 +34,21 @@ export default function InvestigatePage() {
   const isStreamingRef = useRef(false)
   const sessionKeyRef = useRef(null)
   const conversationIdRef = useRef(activeId)
+  const prevMessageCountRef = useRef(0)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  useEffect(() => { scrollToBottom() }, [messages, chainProgress])
+  // Only auto-scroll when NEW messages arrive, not on every poll
+  useEffect(() => {
+    if (messages.length > prevMessageCountRef.current) {
+      scrollToBottom()
+    }
+    prevMessageCountRef.current = messages.length
+  }, [messages])
+
+  useEffect(() => { scrollToBottom() }, [chainProgress])
 
   const loadConversations = async (autoSelect = false) => {
     try {
