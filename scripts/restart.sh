@@ -37,6 +37,8 @@ status() {
 restart_web() {
     echo "Restarting Shadowbox web..."
     launchctl bootout "gui/$USERID/$WEB_LABEL" 2>/dev/null
+    lsof -ti:7799 | xargs kill -9 2>/dev/null
+    find "${HOOK_DIR:-.}" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
     sleep 1
     launchctl bootstrap "gui/$USERID" ~/Library/LaunchAgents/$WEB_LABEL.plist 2>/dev/null || true
     sleep 2
