@@ -50,6 +50,12 @@ FAST_ROUTE_PATTERNS = [
     (r"^enrich\s+(domain\s+)?([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", "osint-researcher"),
     (r"^enrich\s+(hash\s+)?([a-fA-F0-9]{32,64})", "osint-researcher"),
     (r"^triage\s+", "triage-analyst"),
+    (r"^(ask|route to|send to)\s+hunter\b", "osint-researcher"),
+    (r"^(ask|route to|send to)\s+tara\b", "triage-analyst"),
+    (r"^(ask|route to|send to)\s+ward\b", "incident-responder"),
+    (r"^(ask|route to|send to)\s+driver\b", "threat-intel"),
+    (r"^(ask|route to|send to)\s+page\b", "report-writer"),
+    (r"^(ask|route to|send to)\s+wells\b", "log-querier"),
 ]
 
 # Commands blocked from execution
@@ -190,15 +196,30 @@ def _fast_route(message: str) -> Optional[str]:
     return None
 
 
+# Callsign -> agent ID mapping for chain detection
+CALLSIGN_TO_ID = {v.lower(): k for k, v in CALLSIGNS.items()}
+# e.g. {"marshall": "coordinator", "tara": "triage-analyst", ...}
+
+
 def _detect_chain(text: str) -> list[str]:
-    """Detect which specialists the coordinator plans to chain."""
+    """Detect which specialists the coordinator plans to chain.
+    Recognizes both agent IDs (triage-analyst) and callsigns (Tara)."""
     lower = text.lower()
     found = []
     seen = set()
+
+    # Check agent IDs
     for agent in SPECIALIST_AGENTS:
         if agent in lower and agent not in seen:
             found.append(agent)
             seen.add(agent)
+
+    # Check callsigns (Driver, Hunter, etc.)
+    for callsign, agent_id in CALLSIGN_TO_ID.items():
+        if callsign in lower and agent_id not in seen and agent_id in SPECIALIST_AGENTS:
+            found.append(agent_id)
+            seen.add(agent_id)
+
     return found
 
 
