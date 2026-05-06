@@ -309,12 +309,19 @@ class AgentRunner:
         message: str,
         session_key: Optional[str] = None,
         agent_id: str = "coordinator",
+        raw_message: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
-        """Send a message to an agent and yield SSE events."""
+        """Send a message to an agent and yield SSE events.
+
+        Args:
+            message: Full message with conversation context
+            raw_message: The raw user input (without context), used for fast-routing
+        """
         session_id = session_key or str(uuid.uuid4())[:12]
+        user_input = raw_message or message
 
         # SECURITY: Block system commands
-        if _is_blocked_command(message):
+        if _is_blocked_command(user_input):
             yield sse_event("meta", {"session_key": session_id, "agent_id": agent_id})
             yield sse_event("agent_result", {
                 "agent": "coordinator",
@@ -330,8 +337,8 @@ class AgentRunner:
             "agent_id": agent_id,
         })
 
-        # Check for fast-route
-        fast = _fast_route(message) if agent_id == "coordinator" else None
+        # Check for fast-route (uses raw user input, not context-wrapped message)
+        fast = _fast_route(user_input) if agent_id == "coordinator" else None
 
         if fast:
             callsign = CALLSIGNS.get(fast, fast)

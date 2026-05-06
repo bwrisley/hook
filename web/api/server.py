@@ -990,7 +990,7 @@ Respond to the operator's latest message. Use the conversation context to resolv
 
             new_session_key = None
             agent_id = body.agent or "coordinator"
-            async for raw_event in runner.send_message(message_with_context, session_key=session_key, agent_id=agent_id):
+            async for raw_event in runner.send_message(message_with_context, session_key=session_key, agent_id=agent_id, raw_message=body.message):
                 yield raw_event
 
                 # Parse the SSE event to extract type and data
