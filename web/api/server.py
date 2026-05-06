@@ -1,12 +1,12 @@
 """
-web/api/server.py -- HOOK Web API.
+web/api/server.py -- Shadowbox Web API.
 
 FastAPI server providing:
-  - SSE-streamed chat via OpenClaw gateway bridge
+  - SSE-streamed chat via direct OpenAI agent runner
   - Agent status and investigation management
   - Threat feed and config views
 
-Runs on port 7799 alongside the existing Slack interface.
+Runs on port 7799.
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from web.api.gateway_bridge import GatewayBridge
+from web.api.agent_runner import AgentRunner
 from web.api.sse import sse_event, extract_highlights
 from web.api.auth import AuthDB, get_current_user, require_admin, COOKIE_NAME
 from web.api.watchlist import WatchlistDB
@@ -459,7 +459,7 @@ class WebSessionDB:
 # -- App factory --
 
 def create_app() -> FastAPI:
-    bridge = GatewayBridge()
+    runner = AgentRunner()
     db_path = str(DATA_DIR / "hook-web.db")
 
     tracker = AgentTracker(db_path)
@@ -468,13 +468,13 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.bridge = bridge
+        app.state.runner = runner
         app.state.web_db = WebSessionDB(db_path)
         app.state.tracker = tracker
         app.state.auth_db = auth_db
         app.state.watchlist = watchlist_db
         yield
-        await bridge.close()
+        await runner.close()
         app.state.web_db.close()
         tracker.close()
         auth_db.close()
@@ -759,14 +759,14 @@ def create_app() -> FastAPI:
 
     @app.get("/api/status")
     async def status() -> dict[str, Any]:
-        gw_health = await app.state.bridge.health_check()
+        gw_health = await app.state.runner.health_check()
         inv_count = 0
         if INVESTIGATIONS_DIR.exists():
             inv_count = sum(1 for p in INVESTIGATIONS_DIR.iterdir() if p.is_dir())
         return {
             "name": "HOOK",
             "version": "6.0.0",
-            "gateway": gw_health,
+            "agent_provider": gw_health,
             "agent_count": len(AGENTS),
             "active_investigations": inv_count,
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -779,9 +779,9 @@ def create_app() -> FastAPI:
 
         checks = {}
 
-        # Gateway
-        gw = await app.state.bridge.health_check()
-        checks["gateway"] = {"status": gw.get("status", "unknown"), "port": 18789}
+        # Agent Provider (OpenAI)
+        provider = await app.state.runner.health_check()
+        checks["agent_provider"] = provider
 
         # Ollama
         try:
@@ -859,7 +859,7 @@ def create_app() -> FastAPI:
         checks["usage"] = app.state.tracker.get_totals()
 
         # Overall
-        all_ok = checks["gateway"]["status"] == "ok" and checks["database"]["status"] == "ok"
+        all_ok = checks["agent_provider"]["status"] == "ok" and checks["database"]["status"] == "ok"
         return {
             "status": "healthy" if all_ok else "degraded",
             "checks": checks,
@@ -936,7 +936,7 @@ def create_app() -> FastAPI:
     @app.post("/api/chat/stream")
     async def chat_stream(body: ChatRequest, request: Request):
         user = get_current_user(request)
-        bridge: GatewayBridge = app.state.bridge
+        runner: AgentRunner = app.state.runner
         web_db: WebSessionDB = app.state.web_db
 
         conv = web_db.get_or_create(body.conversation_id, user_id=user["username"])
@@ -990,7 +990,7 @@ Respond to the operator's latest message. Use the conversation context to resolv
 
             new_session_key = None
             agent_id = body.agent or "coordinator"
-            async for raw_event in bridge.send_message(message_with_context, session_key=session_key, agent_id=agent_id):
+            async for raw_event in runner.send_message(message_with_context, session_key=session_key, agent_id=agent_id):
                 yield raw_event
 
                 # Parse the SSE event to extract type and data
@@ -1332,7 +1332,7 @@ Respond to the operator's latest message. Use the conversation context to resolv
     @app.post("/api/investigate")
     async def investigate(body: InvestigateRequest):
         """Start a new investigation. Creates investigation context then streams."""
-        bridge: GatewayBridge = app.state.bridge
+        runner: AgentRunner = app.state.runner
         web_db: WebSessionDB = app.state.web_db
 
         conv = web_db.get_or_create()
@@ -1342,7 +1342,7 @@ Respond to the operator's latest message. Use the conversation context to resolv
             yield sse_event("meta", {"conversation_id": conversation_id})
             yield sse_event("investigation", {"status": "starting", "message": body.message})
 
-            async for event in bridge.send_message(body.message):
+            async for event in runner.send_message(body.message):
                 yield event
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
