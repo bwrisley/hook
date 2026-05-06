@@ -65,24 +65,28 @@ BLOCKED_PATTERNS = [
     r"^\s*brew\s+", r"restart\.sh",
 ]
 
-# OpenAI tool definition for exec
-EXEC_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "exec",
-        "description": "Execute a shell command on the host. Use this for enrichment scripts, investigation management, and RAG queries. Available commands: /app/scripts/enrich-ip.sh, /app/scripts/enrich-domain.sh, /app/scripts/enrich-hash.sh, /app/scripts/investigation.sh, /app/scripts/rag-inject.py",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute",
+def _build_exec_tool() -> dict:
+    """Build the exec tool definition with correct paths."""
+    scripts = f"{HOOK_DIR}/scripts"
+    return {
+        "type": "function",
+        "function": {
+            "name": "exec",
+            "description": f"Execute a shell command. Available scripts: {scripts}/enrich-ip.sh, {scripts}/enrich-domain.sh, {scripts}/enrich-hash.sh, {scripts}/investigation.sh, {scripts}/rag-inject.py, {scripts}/query-logs.py. Always use full paths starting with {scripts}/",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to execute. Use full script paths.",
+                    },
                 },
-            },
             "required": ["command"],
         },
     },
 }
+
+EXEC_TOOL = _build_exec_tool()
 
 
 def _load_env_file() -> dict[str, str]:
@@ -167,7 +171,8 @@ def _is_safe_exec(cmd: str) -> bool:
 def _execute_command(cmd: str) -> str:
     """Execute a shell command and return output."""
     if not _is_safe_exec(cmd):
-        return f"BLOCKED: Command not allowed for security reasons: {cmd[:100]}"
+        logger.warning("BLOCKED exec: %s", cmd[:200])
+        return f"BLOCKED: Command not allowed. Use full paths starting with {HOOK_DIR}/scripts/ — for example: {HOOK_DIR}/scripts/investigation.sh create \"title\""
 
     try:
         env = {**os.environ, **_ENV_EXTRA, "HOOK_DIR": HOOK_DIR}
