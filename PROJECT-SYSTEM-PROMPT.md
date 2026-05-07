@@ -38,9 +38,6 @@ log-querier/Wells (gpt-4.1).
 **What's not wired up (yet):**
 - Slack — env vars are reserved (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`);
   no live integration
-- Lobster pipelines — `pipelines/*.yaml` still in repo and referenced by
-  `coordinator/TOOLS.md`, but no executor since OpenClaw was removed.
-  Treat as legacy until either re-implemented in-process or deleted.
 
 **Phase History:**
 - Phase 1 (CLINCH): Prototype
@@ -91,7 +88,6 @@ hook/
 |   +-- enrich-{ip,domain,hash,batch}.sh, extract-iocs.sh, format-report.sh
 |   +-- fetch-feeds.sh, watch-check.py, daily-check.sh, morning-briefing.sh
 |   +-- restart.sh, test-agent.sh, backup-agents.sh
-+-- pipelines/                        # Legacy Lobster YAMLs (no executor)
 +-- config/{*.plist}                  # LaunchAgent templates
 +-- deploy/azure-setup.sh             # Azure Container Apps provisioner
 +-- data/{feeds, cache, faiss, investigations}/  # Runtime (gitignored)
@@ -114,8 +110,6 @@ Priority:
 
 Lower priority:
 - Wire up Slack (Socket Mode, env vars are already reserved)
-- Decide what to do with `pipelines/*.yaml` (delete or reimplement
-  in-process)
 - Export investigation as markdown/PDF
 - IOC quick-submit (batch enrich from pasted list)
 - GreyNoise as 5th IP threat-intel source

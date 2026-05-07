@@ -2,7 +2,6 @@
 tests/test_web_api.py -- Tests for HOOK's FastAPI web server.
 
 Tests endpoint structure and response formats.
-Does not require a running OpenClaw gateway.
 """
 import sys
 import os
@@ -31,7 +30,7 @@ class TestStatusEndpoint:
         data = resp.json()
         assert data["name"] == "HOOK"
         assert "version" in data
-        assert "gateway" in data
+        assert "agent_provider" in data
         assert "agent_count" in data
 
     def test_status_has_generated_at(self, client):
@@ -70,14 +69,6 @@ class TestInvestigationsEndpoint:
         assert resp.status_code in (400, 404, 422)
 
 
-class TestSkillsEndpoint:
-    def test_skills_returns_list(self, client):
-        resp = client.get("/api/skills")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "items" in data
-
-
 class TestFeedsEndpoint:
     def test_feeds_returns_structure(self, client):
         resp = client.get("/api/feeds")
@@ -85,23 +76,6 @@ class TestFeedsEndpoint:
         data = resp.json()
         assert "feeds" in data
         assert "watchlist_count" in data
-
-
-class TestConfigEndpoint:
-    def test_config_returns_masked(self, client):
-        resp = client.get("/api/config")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "config" in data
-        # Secrets should be masked
-        config = data["config"]
-        if "env" in config:
-            env = config["env"]
-            for key in ["VT_API_KEY", "ABUSEIPDB_API_KEY"]:
-                if key in env:
-                    val = env[key]
-                    # Should be masked if it contains a real value
-                    assert val.startswith("YOUR_") or val == "********" or val == ""
 
 
 class TestConversationsEndpoint:

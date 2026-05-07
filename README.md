@@ -184,7 +184,6 @@ hook/
 |   +-- restart.sh             # Service management
 |   +-- test-agent.sh          # Agent testing helper
 |   +-- backup-agents.sh       # SOUL.md/TOOLS.md backup
-+-- pipelines/                  # Legacy Lobster YAMLs (no longer executed)
 +-- data/                       # Runtime data (gitignored)
 +-- config/                     # LaunchAgent plists
 +-- deploy/                     # Azure provisioning

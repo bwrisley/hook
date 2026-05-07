@@ -135,66 +135,6 @@ sessions_spawn(
 )
 ```
 
-## Lobster Pipelines (Deterministic Enrichment)
-
-Lobster runs deterministic shell pipelines — no LLM cost per step, no token overhead. Use these for structured enrichment when you don't need LLM judgment.
-
-**When to use Lobster vs Agent chains:**
-- **Lobster** → "Enrich this IP" / "Run this IOC through all sources" / "Process this alert's IOCs" — pure data enrichment, structured output
-- **Agent chain** → "Triage this alert" / "Is this a true positive?" / "Write me a report for the CISO" — requires judgment, analysis, or audience adaptation
-
-### Available Pipelines
-
-**Single IOC enrichment:**
-```
-lobster(
-  action: "run",
-  pipeline: "pipelines/ioc-enrich-ip.yaml",
-  args: {"ip": "45.77.65.211"},
-  timeoutMs: 30000
-)
-```
-
-```
-lobster(
-  action: "run",
-  pipeline: "pipelines/ioc-enrich-domain.yaml",
-  args: {"domain": "evil-update.com"},
-  timeoutMs: 30000
-)
-```
-
-**Full alert enrichment (extract → enrich all → report):**
-```
-lobster(
-  action: "run",
-  pipeline: "pipelines/alert-to-report.yaml",
-  args: {"alert_text": "[paste full alert text]"},
-  timeoutMs: 120000
-)
-```
-
-**Batch IOC check (from file):**
-```
-lobster(
-  action: "run",
-  pipeline: "pipelines/batch-ioc-check.yaml",
-  args: {"ioc_file": "feeds/daily-iocs.txt"},
-  timeoutMs: 300000
-)
-```
-
-### Combining Lobster + Agents
-
-For a full investigation, you can use Lobster for fast enrichment then hand results to an agent for analysis:
-
-1. Run `alert-to-report` pipeline → get structured enrichment JSON
-2. Read the pipeline output
-3. Spawn `triage-analyst` or `threat-intel` with the enrichment data in the task description
-4. Spawn `report-writer` with both enrichment + analysis findings
-
-This is faster and cheaper than a pure agent chain because the enrichment steps don't consume LLM tokens.
-
 ## Shell Environment
 
 The coordinator CAN and SHOULD use `exec` for:

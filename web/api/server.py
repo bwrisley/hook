@@ -1320,19 +1320,6 @@ Respond to the operator's latest message. Use the conversation context to resolv
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-    @app.get("/api/skills")
-    async def skills() -> dict[str, Any]:
-        """Return available Lobster pipelines."""
-        pipelines_dir = ROOT / "pipelines"
-        items = []
-        if pipelines_dir.exists():
-            for p in sorted(pipelines_dir.glob("*.yaml")):
-                items.append({
-                    "name": p.stem,
-                    "filename": p.name,
-                })
-        return {"items": items}
-
     FEED_META = {
         "feodo": {
             "source": "Feodo Tracker",
