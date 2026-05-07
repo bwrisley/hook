@@ -1,0 +1,82 @@
+SHADOWBOX SESSION CONTINUITY — 2026-05-07
+==========================================
+
+WHAT HAPPENED THIS SESSION:
+1. Removed OpenClaw dependency entirely — replaced with direct OpenAI agent runner
+   - web/api/agent_runner.py replaces web/api/gateway_bridge.py
+   - Agents call OpenAI API directly, tool calls (exec) handled in-process
+   - One container, one process, one set of API keys
+   - No Node.js, no gateway, no exec approvals
+
+2. Fixed chain detection to recognize agent callsigns (Driver, Hunter, etc.)
+   - Marshall says "Routing to Driver" not "Routing to threat-intel"
+   - Fast-route patterns added for "ask Driver", "route to Hunter", etc.
+
+3. Fixed fast-route to use raw user input (not context-wrapped message)
+
+4. Fixed auto-scroll — only scrolls when new messages arrive
+
+5. restart.sh now clears __pycache__ on restart
+
+CURRENT STATE:
+- Everything pushed to git (commit 588ea22)
+- Mac Studio running Shadowbox on port 7799 via LaunchAgent
+- OpenClaw gateway STOPPED (no longer needed)
+- Ollama running locally (nomic-embed-text + qwen2.5:14b)
+- All 7 agents working via direct OpenAI API
+- 8 enrichment sources (VT, AbuseIPDB, Censys, OTX, Shodan, URLhaus, ThreatFox, DNS)
+
+SERVICES RUNNING:
+- com.punchcyber.hook.web (port 7799) — Shadowbox web UI
+- ollama (brew service, port 11434) — local embeddings
+- ai.openclaw.hook-daily — daily feed fetch (6 AM)
+- com.punchcyber.hook.watch-check — watchlist re-enrichment (every 4h)
+- NOTE: ai.openclaw.gateway is NO LONGER NEEDED — do not restart it
+
+AFTER REBOOT:
+1. Shadowbox web should auto-start (LaunchAgent KeepAlive)
+2. Ollama should auto-start (brew service)
+3. Verify: ./scripts/restart.sh status
+4. Test: curl http://localhost:7799/api/status
+5. If web doesn't start: ./scripts/restart.sh web
+
+NEXT PRIORITIES:
+1. NEW AZURE INSTALL GUIDE — needs full rewrite to reflect:
+   - No OpenClaw (eliminated)
+   - Direct OpenAI agent runner
+   - Single container deployment (web only)
+   - Ollama as optional separate service (or use OpenAI embeddings)
+   - Simpler architecture: Browser -> FastAPI -> OpenAI API
+   - Update docs/BUILD-GUIDE.md and docs/DEPLOY-AZURE.md
+   - Update Dockerfile (remove gateway references)
+   - Update docker-compose.yml (remove gateway service)
+   - Update azure_prompt.md (remove gateway references)
+
+2. Deploy to Azure App Service
+   - Web App: ShadowBox (rg-shadowbox)
+   - Decision pending: Ollama separate service vs OpenAI embeddings
+   - Database: Azure PostgreSQL
+
+3. Remaining features (lower priority):
+   - Export investigation as markdown/PDF
+   - IOC quick-submit (paste list, batch enrich)
+   - GreyNoise integration (#5 threat intel source)
+   - Slack integration
+
+API KEYS NEEDED (in .env or Azure Key Vault):
+- OPENAI_API_KEY
+- VT_API_KEY
+- CENSYS_API_ID + CENSYS_API_SECRET
+- ABUSEIPDB_API_KEY
+- OTX_API_KEY
+- SHODAN_API_KEY
+
+FILE REFERENCE:
+- web/api/agent_runner.py — the new agent runner (replaces gateway_bridge.py)
+- web/api/gateway_bridge.py — OLD, still in repo but no longer imported
+- web/api/server.py — imports AgentRunner, not GatewayBridge
+- Dockerfile — needs update to remove gateway references
+- docker-compose.yml — needs update to remove gateway service
+- azure_prompt.md — needs rewrite for new architecture
+- docs/BUILD-GUIDE.md — needs rewrite
+- docs/DEPLOY-AZURE.md — needs rewrite
