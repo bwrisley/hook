@@ -61,8 +61,37 @@ WHAT HAPPENED THIS SESSION (after the morning restart):
      template, finishes with curl against /api/status.
    - Pushed: 124b307..aa7a987
 
+7. Deleted dead OpenClaw-era scripts
+   Commit 8c05b46 — Delete dead OpenClaw-era scripts and config template:
+   - Removed scripts/health-check.sh, scripts/validate-config.sh,
+     scripts/fix-channel-refs.sh, and config/openclaw.json.template
+     (net -816 lines). All four were built around ~/.openclaw/openclaw.json
+     and the Slack channel placeholder; /api/health on the FastAPI
+     service now covers what health-check.sh did.
+   - Dropped the matching `COPY config/openclaw.json.template` from
+     Dockerfile.
+   - Verified no live callers in scripts, plists, Docker, CI, or install
+     guide. Historical mentions in docs/PHASE5-CHECKLIST.md and the old
+     PROJECT-SYSTEM-PROMPT.md were left alone (handled in commit 8 below).
+
+8. Refreshed README.md and PROJECT-SYSTEM-PROMPT.md for Phase 7
+   Commit f7a27f9 — Refresh README and project system prompt for Phase 7:
+   - README: architecture diagram now shows browser -> FastAPI -> agent
+     runner -> OpenAI; Quick Start collapsed to ./install/setup.sh; OpenClaw
+     Gateway dropped from the LaunchAgent table; npm/openclaw out of
+     Requirements; gateway_bridge.py replaced with agent_runner.py in the
+     file reference; pipelines/ flagged as "legacy Lobster YAMLs (no
+     longer executed)"; Phase 7 row added.
+   - PROJECT-SYSTEM-PROMPT.md: Phase 7 current state, Slack reframed as
+     reserved-but-unwired, pipelines/*.yaml flagged as legacy without an
+     executor, OpenClaw schema-quirk lessons replaced with the
+     BLOCKED_PATTERNS / runner-guardrail notes, .env replaces
+     ~/.openclaw/openclaw.json as the canonical config, repo tree
+     refreshed, "do NOT bootstrap ai.openclaw.gateway" warning added.
+   - Pushed: 8c05b46..f7a27f9
+
 CURRENT STATE:
-- main is in sync with origin (commit aa7a987)
+- main is in sync with origin (commit f7a27f9)
 - Mac Studio Shadowbox web running on port 7799
 - Ollama running on 11434
 - ai.openclaw.gateway LaunchAgent booted out (the plist still exists in
@@ -98,18 +127,21 @@ NEXT PRIORITIES:
      (App Service adaptation)
 
 2. Larger code-cleanup items left untouched (low priority):
-   - scripts/fix-channel-refs.sh, scripts/validate-config.sh, and
-     scripts/health-check.sh still reference config/openclaw.json.template
-     and the old openclaw config layout. Those scripts are openclaw-era
-     and orphaned. Either delete them or rip out the template references.
-     Dockerfile still COPYs the template too; harmless cargo until the
-     scripts are touched. (install/setup.sh was rewritten in aa7a987 and
-     no longer touches the template.)
+   - pipelines/*.yaml — 4 Lobster pipeline YAMLs that have no executor
+     post-OpenClaw. Still referenced by workspaces/coordinator/TOOLS.md
+     as routing suggestions, and listed by /api/skills (which the
+     frontend doesn't call). Delete or reimplement in-process.
    - web/api/server.py keeps its own AGENTS list (with role descriptions)
      duplicating the AGENTS dict in agent_runner.py (with model+callsign).
      Different shapes, both live, but worth unifying eventually.
    - docs/HOOK-Install-Guide.docx is a Word doc copy of the OLD install
      guide. Either regenerate from the new install/INSTALL.md or delete.
+   - docs/PHASE5-CHECKLIST.md is a frozen Phase 5 status doc. Leave or
+     archive — historical only.
+   - config/ai.openclaw.hook-{daily,briefing}.plist still use the
+     ai.openclaw.* label as cosmetic naming. The labels are live in
+     launchctl. Renaming would be a larger surgery (rename plist file,
+     bootout/boot-in, update restart.sh's DAILY_LABEL).
 
 3. Remaining features (lower priority):
    - Export investigation as markdown/PDF
