@@ -2,43 +2,45 @@
 # scripts/restart.sh -- Restart Shadowbox services
 #
 # Usage:
-#   ./scripts/restart.sh          # Restart web + gateway
-#   ./scripts/restart.sh web      # Restart web only
-#   ./scripts/restart.sh gateway  # Restart gateway only
+#   ./scripts/restart.sh          # Restart web
+#   ./scripts/restart.sh web      # Restart web
 #   ./scripts/restart.sh status   # Show service status
-#   ./scripts/restart.sh stop     # Stop web + gateway
+#   ./scripts/restart.sh stop     # Stop web
 #
 set -euo pipefail
 
 WEB_LABEL="com.punchcyber.hook.web"
-GW_LABEL="ai.openclaw.gateway"
 DAILY_LABEL="ai.openclaw.hook-daily"
+WATCH_LABEL="com.punchcyber.hook.watch-check"
 USERID=$(id -u)
 
 status() {
     echo "=== Shadowbox Services ==="
-    for label in "$WEB_LABEL" "$GW_LABEL" "$DAILY_LABEL"; do
-        pid=$(launchctl list | grep "$label" | awk '{print $1}')
-        exit_code=$(launchctl list | grep "$label" | awk '{print $2}')
+    for label in "$WEB_LABEL" "$DAILY_LABEL" "$WATCH_LABEL"; do
+        line=$(launchctl list | awk -v l="$label" '$3 == l { print $1, $2 }')
+        if [ -z "$line" ]; then
+            echo "  $label: not loaded"
+            continue
+        fi
+        pid=$(echo "$line" | awk '{print $1}')
+        exit_code=$(echo "$line" | awk '{print $2}')
         if [ "$pid" != "-" ] && [ -n "$pid" ]; then
             echo "  $label: running (PID $pid)"
-        elif [ -n "$exit_code" ]; then
-            echo "  $label: stopped (exit $exit_code)"
         else
-            echo "  $label: not loaded"
+            echo "  $label: stopped (exit $exit_code)"
         fi
     done
     echo ""
     echo "=== Ports ==="
     echo "  Web (7799): $(lsof -ti:7799 2>/dev/null || echo 'not listening')"
-    echo "  Gateway (18789): $(lsof -ti:18789 2>/dev/null || echo 'not listening')"
+    echo "  Ollama (11434): $(lsof -ti:11434 2>/dev/null || echo 'not listening')"
 }
 
 restart_web() {
     echo "Restarting Shadowbox web..."
-    launchctl bootout "gui/$USERID/$WEB_LABEL" 2>/dev/null
-    lsof -ti:7799 | xargs kill -9 2>/dev/null
-    find "${HOOK_DIR:-.}" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
+    launchctl bootout "gui/$USERID/$WEB_LABEL" 2>/dev/null || true
+    lsof -ti:7799 2>/dev/null | xargs kill -9 2>/dev/null || true
+    find "${HOOK_DIR:-.}" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
     sleep 1
     launchctl bootstrap "gui/$USERID" ~/Library/LaunchAgents/$WEB_LABEL.plist 2>/dev/null || true
     sleep 2
@@ -49,25 +51,18 @@ restart_web() {
     fi
 }
 
-restart_gateway() {
-    echo "Restarting OpenClaw gateway..."
-    openclaw gateway restart 2>&1 | grep -v "^$"
-    sleep 2
-    echo "  Gateway: port 18789"
-}
-
 stop_all() {
     echo "Stopping services..."
-    launchctl bootout "gui/$USERID/$WEB_LABEL" 2>/dev/null && echo "  Web stopped" || echo "  Web: not running"
-    openclaw gateway stop 2>/dev/null && echo "  Gateway stopped" || echo "  Gateway: not running"
+    if launchctl bootout "gui/$USERID/$WEB_LABEL" 2>/dev/null; then
+        echo "  Web stopped"
+    else
+        echo "  Web: not running"
+    fi
 }
 
 case "${1:-all}" in
     web)
         restart_web
-        ;;
-    gateway)
-        restart_gateway
         ;;
     status)
         status
@@ -76,13 +71,12 @@ case "${1:-all}" in
         stop_all
         ;;
     all|restart)
-        restart_gateway
         restart_web
         echo ""
         status
         ;;
     *)
-        echo "Usage: $0 {web|gateway|status|stop|all}"
+        echo "Usage: $0 {web|status|stop|all}"
         exit 1
         ;;
 esac

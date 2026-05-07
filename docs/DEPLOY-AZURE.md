@@ -6,14 +6,18 @@
 Internet -> Azure App Gateway (WAF + SSL)
                     |
          Azure Container Apps Environment
-         |              |              |
-    shadowbox-web  shadowbox-gateway  shadowbox-ollama
-    (FastAPI+React) (OpenClaw+Agents)  (Embeddings+Chat)
+         |                            |
+    shadowbox-web                shadowbox-ollama
+    (FastAPI + React +           (Embeddings + Chat,
+     in-process agent runner)     internal only)
          |
     Azure PostgreSQL     Azure Key Vault     Azure Blob Storage
     (sessions, messages, (API keys,          (feeds, cache,
      activity, auth)      secrets)            RAG vectors)
 ```
+
+The web container talks to OpenAI directly via the in-process agent runner
+(`web/api/agent_runner.py`) — there is no separate gateway service.
 
 ## Prerequisites
 
@@ -41,7 +45,7 @@ This creates:
 - PostgreSQL (Burstable B1ms): `shadowbox-db-dev`
 - Key Vault: `shadowbox-kv-dev`
 - Storage Account: `shadowboxstoragedev`
-- Container Apps: `shadowbox-web`, `shadowbox-gateway`, `shadowbox-ollama`
+- Container Apps: `shadowbox-web`, `shadowbox-ollama`
 
 ## Step 3: Add API Keys to Key Vault
 
@@ -73,20 +77,7 @@ az containerapp exec \
     --command "ollama pull qwen2.5:14b"
 ```
 
-## Step 5: Configure OpenClaw
-
-The gateway needs an `openclaw.json` config. Create it in the gateway container's volume:
-
-```bash
-az containerapp exec \
-    --name shadowbox-gateway \
-    --resource-group $RG \
-    --command "cat > /home/node/.openclaw/openclaw.json" < deploy/openclaw-azure.json
-```
-
-Use `deploy/openclaw-azure.json` as template (provided in the repo).
-
-## Step 6: Verify Deployment
+## Step 5: Verify Deployment
 
 ```bash
 # Get the web URL
@@ -105,12 +96,12 @@ Login with default credentials: `admin` / `shadowbox`
 
 **Change the admin password immediately.**
 
-## Step 7: Configure DNS
+## Step 6: Configure DNS
 
 Add a CNAME record for your domain:
 
 ```
-dev-shadowbox.punchcyber.com  CNAME  <web-url-from-step-6>
+dev-shadowbox.punchcyber.com  CNAME  <web-url-from-step-5>
 ```
 
 Then add the custom domain in Azure Portal:
@@ -118,7 +109,7 @@ Then add the custom domain in Azure Portal:
 2. Add `dev-shadowbox.punchcyber.com`
 3. Enable managed SSL certificate
 
-## Step 8: Set Up GitHub Actions
+## Step 7: Set Up GitHub Actions
 
 ### Create Azure Service Principal
 
@@ -146,18 +137,18 @@ In GitHub repo Settings > Environments:
 1. Create `dev` environment (auto-deploy from `dev` branch)
 2. Create `prod` environment (require approval, deploy from `main`)
 
-## Step 9: Create Production Environment
+## Step 8: Create Production Environment
 
 ```bash
 ./deploy/azure-setup.sh prod
 ```
 
-Repeat Steps 3-7 for production with:
+Repeat Steps 3-6 for production with:
 - Resource group: `shadowbox-prod`
 - Key Vault: `shadowbox-kv-prod`
 - Domain: `shadowbox.punchcyber.com`
 
-## Step 10: Deploy via CI/CD
+## Step 9: Deploy via CI/CD
 
 ```bash
 # Dev deployment
@@ -180,13 +171,10 @@ az containerapp update \
     --name shadowbox-web \
     --resource-group shadowbox-prod \
     --min-replicas 2 --max-replicas 10
-
-# Scale gateway
-az containerapp update \
-    --name shadowbox-gateway \
-    --resource-group shadowbox-prod \
-    --min-replicas 2 --max-replicas 5
 ```
+
+The web app is the only stateless tier — Ollama is single-replica because
+the model cache is local to the container.
 
 ### Logs
 
@@ -197,9 +185,9 @@ az containerapp logs show \
     --resource-group shadowbox-prod \
     --follow
 
-# Gateway logs
+# Ollama logs
 az containerapp logs show \
-    --name shadowbox-gateway \
+    --name shadowbox-ollama \
     --resource-group shadowbox-prod \
     --follow
 ```
@@ -219,7 +207,7 @@ pg_dump "postgresql://shadowbox:<password>@shadowbox-db-prod.postgres.database.a
 KV="shadowbox-kv-prod"
 az keyvault secret set --vault-name $KV --name openai-api-key --value "<new-key>"
 
-# Restart containers to pick up new secrets
+# Restart container to pick up new secrets
 az containerapp revision restart \
     --name shadowbox-web \
     --resource-group shadowbox-prod
@@ -237,21 +225,22 @@ Set up Azure Monitor alerts:
 | Resource | SKU | Estimated Monthly |
 |----------|-----|------------------|
 | Container App (web) | 1 vCPU, 2GB | ~$35 |
-| Container App (gateway) | 1 vCPU, 2GB | ~$35 |
 | Container App (ollama) | 2 vCPU, 8GB | ~$100 |
 | PostgreSQL | B1ms | ~$25 |
 | Storage | Standard LRS | ~$5 |
 | Key Vault | Standard | ~$1 |
-| **Total** | | **~$200/month** |
+| **Total** | | **~$165/month** |
 
-Production costs scale with replicas and PostgreSQL tier.
+Production costs scale with replicas and PostgreSQL tier. Switching the
+embedding provider from local Ollama to OpenAI removes the ~$100/mo Ollama
+container in exchange for OpenAI usage charges.
 
 ## Security Checklist
 
 - [ ] Change default admin password
 - [ ] API keys in Key Vault (not in env files or code)
 - [ ] PostgreSQL SSL enforced (`sslmode=require`)
-- [ ] Container Apps ingress: web=external, gateway=internal, ollama=internal
+- [ ] Container Apps ingress: web=external, ollama=internal
 - [ ] WAF enabled on Application Gateway (prod)
 - [ ] Azure AD integration for admin access (future)
 - [ ] Network Security Group restricts DB access to Container App subnet

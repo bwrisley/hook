@@ -8,7 +8,6 @@ on:
 env:
   REGISTRY: ghcr.io
   WEB_IMAGE: ghcr.io/${{ github.repository }}/shadowbox-web
-  GATEWAY_IMAGE: ghcr.io/${{ github.repository }}/shadowbox-gateway
 
 jobs:
   test:
@@ -67,16 +66,6 @@ jobs:
             ${{ env.WEB_IMAGE }}:${{ steps.env.outputs.tag }}
             ${{ env.WEB_IMAGE }}:${{ github.sha }}
 
-      - name: Build and push gateway image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: Dockerfile.gateway
-          push: true
-          tags: |
-            ${{ env.GATEWAY_IMAGE }}:${{ steps.env.outputs.tag }}
-            ${{ env.GATEWAY_IMAGE }}:${{ github.sha }}
-
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -110,10 +99,3 @@ jobs:
           resourceGroup: ${{ steps.env.outputs.rg }}
           containerAppName: shadowbox-web
           imageToDeploy: ${{ env.WEB_IMAGE }}:${{ steps.env.outputs.tag }}
-
-      - name: Deploy gateway container
-        uses: azure/container-apps-deploy-action@v1
-        with:
-          resourceGroup: ${{ steps.env.outputs.rg }}
-          containerAppName: shadowbox-gateway
-          imageToDeploy: ${{ env.GATEWAY_IMAGE }}:${{ steps.env.outputs.tag }}

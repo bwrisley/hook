@@ -36,11 +36,11 @@ echo "  Hostname: $HOSTNAME"
 echo ""
 
 # ── 1. Resource Group ──────────────────────────────────────────
-echo "[1/8] Creating resource group..."
+echo "[1/7] Creating resource group..."
 az group create --name "$RG" --location "$REGION" --output none
 
 # ── 2. Container App Environment ───────────────────────────────
-echo "[2/8] Creating Container App Environment..."
+echo "[2/7] Creating Container App Environment..."
 az containerapp env create \
     --name "${BASE_NAME}-env" \
     --resource-group "$RG" \
@@ -48,7 +48,7 @@ az containerapp env create \
     --output none
 
 # ── 3. PostgreSQL ──────────────────────────────────────────────
-echo "[3/8] Creating PostgreSQL server..."
+echo "[3/7] Creating PostgreSQL server..."
 DB_PASS=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
 az postgres flexible-server create \
     --name "${BASE_NAME}-db-${ENV}" \
@@ -68,7 +68,7 @@ DB_URL="postgresql://shadowbox:${DB_PASS}@${DB_HOST}:5432/shadowbox?sslmode=requ
 echo "  DB Host: $DB_HOST"
 
 # ── 4. Key Vault ──────────────────────────────────────────────
-echo "[4/8] Creating Key Vault..."
+echo "[4/7] Creating Key Vault..."
 az keyvault create \
     --name "${BASE_NAME}-kv-${ENV}" \
     --resource-group "$RG" \
@@ -92,7 +92,7 @@ echo "  az keyvault secret set --vault-name ${BASE_NAME}-kv-${ENV} --name shodan
 echo ""
 
 # ── 5. Storage Account ────────────────────────────────────────
-echo "[5/8] Creating Storage Account..."
+echo "[5/7] Creating Storage Account..."
 STORAGE_NAME="${BASE_NAME}storage${ENV}"
 az storage account create \
     --name "$STORAGE_NAME" \
@@ -106,7 +106,7 @@ az storage container create --name cache --account-name "$STORAGE_NAME" --output
 az storage container create --name faiss --account-name "$STORAGE_NAME" --output none
 
 # ── 6. Deploy Ollama Container ─────────────────────────────────
-echo "[6/8] Deploying Ollama..."
+echo "[6/7] Deploying Ollama..."
 az containerapp create \
     --name "${BASE_NAME}-ollama" \
     --resource-group "$RG" \
@@ -117,21 +117,8 @@ az containerapp create \
     --ingress internal --target-port 11434 \
     --output none
 
-# ── 7. Deploy Gateway Container ───────────────────────────────
-echo "[7/8] Deploying Gateway..."
-az containerapp create \
-    --name "${BASE_NAME}-gateway" \
-    --resource-group "$RG" \
-    --environment "${BASE_NAME}-env" \
-    --image ghcr.io/bwrisley/hook/shadowbox-gateway:${ENV} \
-    --cpu 1 --memory 2Gi \
-    --min-replicas "$MIN_REPLICAS" --max-replicas "$MAX_REPLICAS" \
-    --ingress internal --target-port 18789 \
-    --env-vars "HOOK_DIR=/app" \
-    --output none
-
-# ── 8. Deploy Web Container ───────────────────────────────────
-echo "[8/8] Deploying Web..."
+# ── 7. Deploy Web Container ───────────────────────────────────
+echo "[7/7] Deploying Web..."
 az containerapp create \
     --name "${BASE_NAME}-web" \
     --resource-group "$RG" \
@@ -144,7 +131,6 @@ az containerapp create \
         "HOOK_DIR=/app" \
         "DATABASE_URL=secretref:database-url" \
         "OLLAMA_BASE_URL=http://${BASE_NAME}-ollama:11434" \
-        "HOOK_GATEWAY_URL=http://${BASE_NAME}-gateway:18789" \
     --output none
 
 # Get the web URL

@@ -8,12 +8,11 @@
 
 ## What You're Building
 
-Shadowbox is a multi-agent SOC assistant. It has 4 containers:
+Shadowbox is a multi-agent SOC assistant. It has 3 containers:
 
 | Container | What it does | Port |
 |-----------|-------------|------|
-| **shadowbox-web** | Web UI + API (what analysts use) | 7799 |
-| **shadowbox-gateway** | AI agent runtime (OpenClaw) | 18789 |
+| **shadowbox-web** | Web UI + API + in-process agent runner (calls OpenAI directly) | 7799 |
 | **shadowbox-ollama** | Local AI for embeddings | 11434 |
 | **db** | PostgreSQL database | 5432 |
 
@@ -76,6 +75,9 @@ docker --version
 
 ### 1.3 Install Node.js
 
+Only needed if you plan to build the frontend outside the Docker image (the
+Dockerfile bundles a Node 22 build stage).
+
 ```bash
 brew install node@22
 ```
@@ -133,7 +135,6 @@ docker compose build
 This takes 3-5 minutes the first time. You should see:
 ```
 => [web] Successfully built
-=> [gateway] Successfully built
 ```
 
 Start everything:
@@ -146,11 +147,10 @@ Check all containers are running:
 docker compose ps
 ```
 
-You should see 4 containers with status "Up":
+You should see 3 containers with status "Up":
 ```
 NAME                 STATUS
 hook-web-1           Up
-hook-gateway-1       Up
 hook-db-1            Up (healthy)
 hook-ollama-1        Up
 ```
@@ -216,7 +216,7 @@ This takes 10-15 minutes. It creates:
 - PostgreSQL database
 - Key Vault for secrets
 - Storage account
-- 3 container apps (web, gateway, ollama)
+- 2 container apps (web, ollama)
 
 **SAVE THE OUTPUT** — it contains the database password and next steps.
 
@@ -472,7 +472,6 @@ az keyvault secret list \
 ```bash
 RG="shadowbox-dev"
 az containerapp revision restart --name shadowbox-web --resource-group $RG
-az containerapp revision restart --name shadowbox-gateway --resource-group $RG
 az containerapp revision restart --name shadowbox-ollama --resource-group $RG
 ```
 

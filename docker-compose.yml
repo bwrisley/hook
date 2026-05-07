@@ -7,7 +7,6 @@
 #
 # Access:
 #   Web UI:  http://localhost:7799
-#   Gateway: http://localhost:18789
 
 services:
   web:
@@ -21,31 +20,13 @@ services:
       - HOOK_DIR=/app
       - DATABASE_URL=postgresql://shadowbox:shadowbox@db:5432/shadowbox
       - OLLAMA_BASE_URL=http://ollama:11434
-      - HOOK_GATEWAY_URL=http://gateway:18789
     depends_on:
       db:
         condition: service_healthy
-      gateway:
-        condition: service_started
     volumes:
       - feed-data:/app/data/feeds
       - cache-data:/app/data/cache
       - faiss-data:/app/data/faiss
-    restart: unless-stopped
-
-  gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile.gateway
-    ports:
-      - "18789:18789"
-    env_file: .env
-    environment:
-      - HOOK_DIR=/app
-    volumes:
-      - openclaw-data:/home/node/.openclaw
-      - feed-data:/app/data/feeds
-      - cache-data:/app/data/cache
       - investigation-data:/app/data/investigations
     restart: unless-stopped
 
@@ -76,7 +57,6 @@ services:
 
 volumes:
   pg-data:
-  openclaw-data:
   feed-data:
   cache-data:
   faiss-data:
