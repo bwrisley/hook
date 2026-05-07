@@ -42,7 +42,6 @@ COPY web/api/ ./web/api/
 COPY web/__init__.py ./web/
 COPY scripts/ ./scripts/
 COPY workspaces/ ./workspaces/
-COPY config/openclaw.json.template ./config/
 COPY tests/mocks/ ./tests/mocks/
 
 # Copy built frontend from stage 1
