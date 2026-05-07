@@ -45,8 +45,24 @@ WHAT HAPPENED THIS SESSION (after the morning restart):
 
 5. Pushed both commits to origin/main (b5cd183..6787af2)
 
+6. Rewrote install/INSTALL.md and install/setup.sh
+   Commit aa7a987 — Rewrite install guide and setup script for post-OpenClaw stack:
+   - INSTALL.md (615 -> 285 lines): new architecture diagram (browser ->
+     FastAPI -> in-process agent runner -> OpenAI), prereqs trimmed to
+     Python 3.13+/Node 22+/Homebrew/Ollama, manual-setup section for hand
+     installs, troubleshooting covers web start failures, API key reload,
+     Ollama unreachable, DB reset, and per-source enrichment debugging.
+   - setup.sh (rewrite): idempotent. Checks prereqs, offers brew install
+     for missing CLI tools, builds Python venv + frontend bundle, copies
+     .env.example -> .env if missing and only prompts for blank keys
+     (re-runs don't re-prompt for already-set keys), starts Ollama and
+     offers to pull nomic-embed-text (default Y) and qwen2.5:14b
+     (default N, 9GB), offers to install the LaunchAgent from the
+     template, finishes with curl against /api/status.
+   - Pushed: 124b307..aa7a987
+
 CURRENT STATE:
-- main is in sync with origin (commit 6787af2)
+- main is in sync with origin (commit aa7a987)
 - Mac Studio Shadowbox web running on port 7799
 - Ollama running on 11434
 - ai.openclaw.gateway LaunchAgent booted out (the plist still exists in
@@ -82,14 +98,18 @@ NEXT PRIORITIES:
      (App Service adaptation)
 
 2. Larger code-cleanup items left untouched (low priority):
-   - install/setup.sh, scripts/fix-channel-refs.sh, scripts/validate-config.sh
-     all reference config/openclaw.json.template — those scripts are
-     openclaw-era and orphaned. Either delete them or rip out the template
-     references. Dockerfile still COPYs the template too; harmless cargo
-     until the scripts are touched.
+   - scripts/fix-channel-refs.sh, scripts/validate-config.sh, and
+     scripts/health-check.sh still reference config/openclaw.json.template
+     and the old openclaw config layout. Those scripts are openclaw-era
+     and orphaned. Either delete them or rip out the template references.
+     Dockerfile still COPYs the template too; harmless cargo until the
+     scripts are touched. (install/setup.sh was rewritten in aa7a987 and
+     no longer touches the template.)
    - web/api/server.py keeps its own AGENTS list (with role descriptions)
      duplicating the AGENTS dict in agent_runner.py (with model+callsign).
      Different shapes, both live, but worth unifying eventually.
+   - docs/HOOK-Install-Guide.docx is a Word doc copy of the OLD install
+     guide. Either regenerate from the new install/INSTALL.md or delete.
 
 3. Remaining features (lower priority):
    - Export investigation as markdown/PDF
