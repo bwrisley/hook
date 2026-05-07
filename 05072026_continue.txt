@@ -1,37 +1,65 @@
-SHADOWBOX SESSION CONTINUITY — 2026-05-07
+SHADOWBOX SESSION CONTINUITY — 2026-05-07 (updated)
 ==========================================
 
-WHAT HAPPENED THIS SESSION:
-1. Removed OpenClaw dependency entirely — replaced with direct OpenAI agent runner
-   - web/api/agent_runner.py replaces web/api/gateway_bridge.py
-   - Agents call OpenAI API directly, tool calls (exec) handled in-process
-   - One container, one process, one set of API keys
-   - No Node.js, no gateway, no exec approvals
+WHAT HAPPENED THIS SESSION (after the morning restart):
 
-2. Fixed chain detection to recognize agent callsigns (Driver, Hunter, etc.)
-   - Marshall says "Routing to Driver" not "Routing to threat-intel"
-   - Fast-route patterns added for "ask Driver", "route to Hunter", etc.
+1. Brought services back to expected post-OpenClaw state
+   - Booted out the orphaned ai.openclaw.gateway LaunchAgent (port 18789)
+   - Loaded com.punchcyber.hook.web LaunchAgent (port 7799)
+   - Verified ollama still running on 11434
 
-3. Fixed fast-route to use raw user input (not context-wrapped message)
+2. Fixed scripts/restart.sh
+   - Was crashing under set -e because grep for the now-removed gateway
+     label returned nothing. Status subcommand now uses awk-based exact
+     match, drops the gateway block, adds watch-check status.
 
-4. Fixed auto-scroll — only scrolls when new messages arrive
+3. Rewrote build/deploy artifacts to drop the gateway tier
+   Commit 3b25bd7 — Drop OpenClaw gateway from build, deploy, and docs:
+   - Deleted Dockerfile.gateway and deploy/openclaw-azure.json
+   - docker-compose.yml: removed gateway service, HOOK_GATEWAY_URL, the
+     openclaw-data volume; added an investigation-data mount on web
+   - deploy/azure-setup.sh: dropped the gateway containerapp step
+     (now [7/7] not [8/8]) and the HOOK_GATEWAY_URL env var
+   - .github/workflows/deploy.yml: dropped GATEWAY_IMAGE, the gateway
+     build step, and the gateway deploy step
+   - docs/DEPLOY-AZURE.md: rewrote architecture diagram (2 container
+     apps), dropped the "Configure OpenClaw" step, updated cost table
+     to ~$165/mo (was ~$200/mo)
+   - docs/BUILD-GUIDE.md: dropped gateway from container table, fixed
+     build/ps output, updated provisioning step count
+   - azure_prompt.md: rewrote for single-container App Service; added
+     Ollama-vs-OpenAI-embeddings decision point
 
-5. restart.sh now clears __pycache__ on restart
+4. Removed dead OpenClaw code from server and Settings UI
+   Commit 6787af2 — Remove dead OpenClaw remnants from server and Settings UI:
+   - Deleted web/api/gateway_bridge.py (540 lines, no importers)
+   - web/api/server.py: removed /api/config endpoint, CONFIG_TEMPLATE,
+     _mask_secrets, SECRET_RE, unused `re` import, the openclaw.json
+     fallback in _key_exists; rewrote the misleading "static fallback
+     when gateway is unreachable" comment over the AGENTS list
+   - web/src/pages/SettingsPage.jsx: replaced the dead "OpenClaw Gateway"
+     tile (it read checks.gateway which never resolved) with an Agent
+     Provider tile reading checks.agent_provider; dropped the now-broken
+     Configuration panel and its /api/config fetch
+   - web/src/pages/InvestigatePage.jsx: stale comment
+
+5. Pushed both commits to origin/main (b5cd183..6787af2)
 
 CURRENT STATE:
-- Everything pushed to git (commit 588ea22)
-- Mac Studio running Shadowbox on port 7799 via LaunchAgent
-- OpenClaw gateway STOPPED (no longer needed)
-- Ollama running locally (nomic-embed-text + qwen2.5:14b)
-- All 7 agents working via direct OpenAI API
-- 8 enrichment sources (VT, AbuseIPDB, Censys, OTX, Shodan, URLhaus, ThreatFox, DNS)
+- main is in sync with origin (commit 6787af2)
+- Mac Studio Shadowbox web running on port 7799
+- Ollama running on 11434
+- ai.openclaw.gateway LaunchAgent booted out (the plist still exists in
+  ~/Library/LaunchAgents but is not loaded — leave it alone, it'll come
+  back on next reboot if anyone runs `launchctl bootstrap` on it)
+- Frontend rebuilt locally (web/dist), but dist is gitignored — CI/Docker
+  rebuilds it from source
 
 SERVICES RUNNING:
-- com.punchcyber.hook.web (port 7799) — Shadowbox web UI
-- ollama (brew service, port 11434) — local embeddings
+- com.punchcyber.hook.web (port 7799) — Shadowbox web UI + agent runner
+- ollama (brew service, port 11434) — local embeddings + qwen2.5:14b
 - ai.openclaw.hook-daily — daily feed fetch (6 AM)
 - com.punchcyber.hook.watch-check — watchlist re-enrichment (every 4h)
-- NOTE: ai.openclaw.gateway is NO LONGER NEEDED — do not restart it
 
 AFTER REBOOT:
 1. Shadowbox web should auto-start (LaunchAgent KeepAlive)
@@ -39,23 +67,29 @@ AFTER REBOOT:
 3. Verify: ./scripts/restart.sh status
 4. Test: curl http://localhost:7799/api/status
 5. If web doesn't start: ./scripts/restart.sh web
+6. If ai.openclaw.gateway comes back loaded after reboot, bootout again:
+   launchctl bootout gui/$(id -u)/ai.openclaw.gateway
+   (or just delete ~/Library/LaunchAgents/ai.openclaw.gateway.plist)
 
 NEXT PRIORITIES:
-1. NEW AZURE INSTALL GUIDE — needs full rewrite to reflect:
-   - No OpenClaw (eliminated)
-   - Direct OpenAI agent runner
-   - Single container deployment (web only)
-   - Ollama as optional separate service (or use OpenAI embeddings)
-   - Simpler architecture: Browser -> FastAPI -> OpenAI API
-   - Update docs/BUILD-GUIDE.md and docs/DEPLOY-AZURE.md
-   - Update Dockerfile (remove gateway references)
-   - Update docker-compose.yml (remove gateway service)
-   - Update azure_prompt.md (remove gateway references)
 
-2. Deploy to Azure App Service
+1. Deploy to Azure App Service (azure_prompt.md is now accurate)
    - Web App: ShadowBox (rg-shadowbox)
-   - Decision pending: Ollama separate service vs OpenAI embeddings
+   - Decision pending: Ollama as separate Web App vs OpenAI embeddings
+     (single Web App, no VNet integration needed)
    - Database: Azure PostgreSQL
+   - Reference: docs/DEPLOY-AZURE.md (Container Apps), azure_prompt.md
+     (App Service adaptation)
+
+2. Larger code-cleanup items left untouched (low priority):
+   - install/setup.sh, scripts/fix-channel-refs.sh, scripts/validate-config.sh
+     all reference config/openclaw.json.template — those scripts are
+     openclaw-era and orphaned. Either delete them or rip out the template
+     references. Dockerfile still COPYs the template too; harmless cargo
+     until the scripts are touched.
+   - web/api/server.py keeps its own AGENTS list (with role descriptions)
+     duplicating the AGENTS dict in agent_runner.py (with model+callsign).
+     Different shapes, both live, but worth unifying eventually.
 
 3. Remaining features (lower priority):
    - Export investigation as markdown/PDF
@@ -72,11 +106,11 @@ API KEYS NEEDED (in .env or Azure Key Vault):
 - SHODAN_API_KEY
 
 FILE REFERENCE:
-- web/api/agent_runner.py — the new agent runner (replaces gateway_bridge.py)
-- web/api/gateway_bridge.py — OLD, still in repo but no longer imported
-- web/api/server.py — imports AgentRunner, not GatewayBridge
-- Dockerfile — needs update to remove gateway references
-- docker-compose.yml — needs update to remove gateway service
-- azure_prompt.md — needs rewrite for new architecture
-- docs/BUILD-GUIDE.md — needs rewrite
-- docs/DEPLOY-AZURE.md — needs rewrite
+- web/api/agent_runner.py — in-process OpenAI agent runner
+- web/api/server.py — FastAPI app; AGENTS list lives here for /api/agents
+- Dockerfile — single-stage Node frontend + Python runtime, web only
+- docker-compose.yml — local dev stack: web + db + ollama
+- deploy/azure-setup.sh — provisions web + ollama Container Apps
+- .github/workflows/deploy.yml — builds and deploys web image only
+- azure_prompt.md — App Service deployment prompt for Claude Code session
+- docs/BUILD-GUIDE.md, docs/DEPLOY-AZURE.md — operational guides
