@@ -79,11 +79,11 @@ class TestFeedsEndpoint:
 
 
 class TestConversationsEndpoint:
-    def test_conversations_returns_list(self, client):
+    def test_conversations_requires_auth(self, client):
+        # Unauthenticated callers must be rejected — this endpoint exposes
+        # per-user conversation history.
         resp = client.get("/api/conversations")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "items" in data
+        assert resp.status_code == 401
 
 
 if __name__ == "__main__":

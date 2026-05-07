@@ -1439,6 +1439,10 @@ Respond to the operator's latest message. Use the conversation context to resolv
         # Catch-all: serve index.html for all non-API routes (SPA client-side routing)
         @app.get("/{path:path}")
         async def spa_catch_all(path: str):
+            # Don't swallow unmatched API routes as the SPA — return 404 so
+            # clients see a real error rather than HTML.
+            if path.startswith("api/") or path == "api":
+                raise HTTPException(status_code=404, detail="Not found")
             # If it's a real file in dist, serve it
             file_path = DIST_DIR / path
             if path and file_path.exists() and file_path.is_file():
