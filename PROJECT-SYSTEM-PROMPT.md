@@ -1,78 +1,126 @@
-HOOK — Hunting, Orchestration & Operational Knowledge
+HOOK / Shadowbox — Hunting, Orchestration & Operational Knowledge
 by PUNCH Cyber
 
-Continue building HOOK, a multi-agent SOC assistant on OpenClaw. Repo: https://github.com/bwrisley/hook | Local: ~/PROJECTS/hook
+Continue building HOOK / Shadowbox, a multi-agent SOC assistant. Repo: https://github.com/bwrisley/hook | Local: ~/projects/hook
 
-## Current State (Phase 5 Complete)
+## Current State (Phase 7 Complete — OpenClaw eliminated)
 
-6 agents operational on OpenClaw via native npm on Mac Studio (no Docker sandbox). Integrated with Slack (#hook channel) using Socket Mode. All agents route correctly via coordinator. All 6 Frozen Ledger smoke tests passing.
+Single FastAPI process on port 7799 with an in-process agent runner that
+calls OpenAI directly. 7 agents operational. Web UI is the primary
+interface; Slack is reserved but not yet wired up. Mac Studio (M4 Max)
+is the dev environment via the `com.punchcyber.hook.web` LaunchAgent.
 
-**Agents:** coordinator (gpt-4.1), triage-analyst (gpt-4.1), osint-researcher (gpt-4.1), incident-responder (gpt-5), threat-intel (gpt-5), report-writer (gpt-4.1)
+**Agents:** coordinator/Marshall (gpt-4.1), triage-analyst/Tara (gpt-4.1),
+osint-researcher/Hunter (gpt-4.1), incident-responder/Ward (gpt-4.1),
+threat-intel/Driver (gpt-5), report-writer/Page (gpt-5),
+log-querier/Wells (gpt-4.1).
 
 **What works:**
-- Coordinator routes to correct specialist via sessions_spawn
+- Marshall routes to specialists by callsign; chain detection recognizes
+  "Routing to Driver", "ask Hunter", etc.
 - Multi-step chains: triage -> OSINT -> IR/report with context passing
-- Enrichment APIs: VirusTotal, Censys, AbuseIPDB (all live, rate-limited)
-- Native tools: jq, dig, whois, nmap installed via Homebrew
-- Hardened scripts: input validation, rate limiting (file-based sliding window), structured JSONL logging, no shell injection
-- Lobster pipelines: ioc-enrich-ip, ioc-enrich-domain, alert-to-report, batch-ioc-check
-- Cron automation: fetch-feeds.sh (Feodo/URLhaus/ThreatFox), watchlist.sh, daily-check.sh, morning-briefing.sh
-- macOS LaunchAgents for scheduling (6 AM daily check, 8 AM briefing)
-- Health check: scripts/health-check.sh validates full environment
-- Config validation: scripts/validate-config.sh checks structure, schema, drift against template
-- Install docs: comprehensive install/INSTALL.md + install/setup.sh for junior devs
-- Smoke test: Operation Frozen Ledger (tests/scenarios/operation-frozen-ledger.md) — all 6 tests passing
-- Test runner: tests/run-frozen-ledger.sh (print / --post / --log modes)
+- Fast-route patterns skip Marshall for simple `enrich <ioc>` and
+  `ask <callsign>` requests
+- 8-source IP enrichment (VT, AbuseIPDB, Censys, OTX, Shodan, URLhaus,
+  ThreatFox, DNS), 6-source domain, 3-source hash; per-source `--source`
+  flag for debugging
+- Hardened scripts: input validation, file-based sliding-window rate
+  limiting, structured JSONL logging, no shell injection
+- Cron automation: hook-daily (6 AM feed fetch), watch-check (every 4h
+  re-enrichment of watchlist IOCs)
+- Local Ollama (brew service) for nomic-embed-text RAG embeddings and
+  optional qwen2.5:14b chat
+- Web UI: Investigate/Agents/History/Feeds/Settings/Audit/Users pages,
+  multi-user auth, conversation sharing, notification bell with auto
+  investigations, audit log with token + cost tracking
+- Frozen Ledger smoke tests in `tests/scenarios/`
+
+**What's not wired up (yet):**
+- Slack — env vars are reserved (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`);
+  no live integration
+- Lobster pipelines — `pipelines/*.yaml` still in repo and referenced by
+  `coordinator/TOOLS.md`, but no executor since OpenClaw was removed.
+  Treat as legacy until either re-implemented in-process or deleted.
 
 **Phase History:**
 - Phase 1 (CLINCH): Prototype
 - Phase 2 (HOOK): Production rebuild, 6 agents, Slack integration, enrichment APIs
-- Phase 3: Coordinator routing overhaul, native tools, session memory/context passing, Lobster pipelines
-- Phase 4: Install docs, production hardening (validation/rate-limiting/logging), cron & automation
-- Phase 5: Config stabilization, channel standardization (#hook), config validation tooling, Frozen Ledger test runner, all 6 tests passing
+- Phase 3: Coordinator routing overhaul, native tools, context passing, Lobster pipelines
+- Phase 4: Install docs, production hardening, cron automation
+- Phase 5: Config stabilization, channel standardization, Frozen Ledger test runner
+- Phase 6: Shadowbox web UI, RAG memory, 7th agent (Wells), Ollama,
+  multi-user auth, 8-source enrichment, watchlist monitoring, audit log,
+  investigation lifecycle
+- Phase 7: OpenClaw eliminated. Single FastAPI process with in-process
+  agent runner. Build/deploy collapsed to one container. Azure target
+  switches from 3 container apps to 2 (web + optional Ollama).
 
 **Key Lessons:**
-- OpenClaw JSON schema is extremely strict — rejects unknown keys. Known invalid: auth, compaction, description, tools.lobster, session.dmScope, gateway.bind, gateway.controlUi as boolean (must be object), channels.slack.streaming (replaced by nativeStreaming)
-- Agents run exec commands on macOS host (no sandbox) — env vars from openclaw.json are available
-- Agents sometimes use web_fetch instead of exec for API calls despite TOOLS.md instructions
-- grep -c returns exit code 1 on zero matches — use || true, never || echo 0
-- VT free tier: 4 req/min — rate limiting is essential for batch operations
-- Live config accumulates extra keys from OpenClaw (webhookPath, userTokenReadOnly, groupPolicy, gateway.auth, wizard, commands) — these are safe, managed by the platform
-- Config template uses HOOK_CHANNEL_NAME placeholder; setup.sh prompts for channel name
-- Root INSTALL.md is a redirect to install/INSTALL.md (the canonical guide)
+- Agents call OpenAI directly via the runner; tool calls (`exec`) run
+  on the host filesystem with no sandbox. The `BLOCKED_PATTERNS` list
+  in `agent_runner.py` is the only guardrail — keep it tight.
+- Agents sometimes try to use `web_fetch` instead of `exec` for API
+  calls despite TOOLS.md instructions. Stronger language in SOUL.md
+  helps.
+- `grep -c` returns exit code 1 on zero matches — use `|| true`, never
+  `|| echo 0`.
+- VT free tier is 4 req/min — rate limiting in `scripts/lib/common.py`
+  is essential for batch operations.
+- Root `INSTALL.md` is a one-line redirect to `install/INSTALL.md`
+  (canonical guide).
+- `restart.sh` covers only the web service now. The
+  `ai.openclaw.gateway` plist still exists in `~/Library/LaunchAgents`
+  on dev machines — leave it unloaded; do NOT bootstrap it.
 
-**Config:** ~/.openclaw/openclaw.json (exec timeout 180s, subagent timeout 300s)
+**Config:** `.env` (gitignored). API keys for OpenAI, VT, Censys (ID +
+Secret), AbuseIPDB, OTX, Shodan. Optional: `DATABASE_URL` for Postgres,
+`OLLAMA_BASE_URL` to point at a remote Ollama.
 
 **Repo Structure:**
 ```
 hook/
-+-- workspaces/{coordinator,triage-analyst,osint-researcher,incident-responder,threat-intel,report-writer}/
++-- workspaces/{coordinator,triage-analyst,osint-researcher,incident-responder,threat-intel,report-writer,log-querier}/
 |   +-- SOUL.md (personality, routing rules)
 |   +-- TOOLS.md (tool instructions, API templates)
++-- web/
+|   +-- api/{server.py, agent_runner.py, auth.py, watchlist.py, sse.py}
+|   +-- src/                         # React + Vite + Tailwind frontend
++-- core/{db, rag, llm}/              # OpenSearch, RAG engine, Ollama provider
 +-- scripts/
-|   +-- lib/{common.py, slack-notify.sh}
+|   +-- lib/common.py
 |   +-- enrich-{ip,domain,hash,batch}.sh, extract-iocs.sh, format-report.sh
-|   +-- fetch-feeds.sh, watchlist.sh, daily-check.sh, morning-briefing.sh
-|   +-- health-check.sh, validate-config.sh, fix-channel-refs.sh, schedule-install.sh
-+-- pipelines/{ioc-enrich-ip,ioc-enrich-domain,alert-to-report,batch-ioc-check}.yaml
-+-- config/{openclaw.json.template, *.plist, Dockerfile.hook, build.sh, USER.md.template}
-+-- data/{feeds/, reports/, watchlist.txt}
-+-- tests/{scenarios/operation-frozen-ledger.md, run-frozen-ledger.sh, results/, ioc-lists/}
-+-- docs/{RESEARCH-INTER-AGENT-ROUTING.md, PIPELINES.md, PHASE5-CHECKLIST.md, skills/}
+|   +-- fetch-feeds.sh, watch-check.py, daily-check.sh, morning-briefing.sh
+|   +-- restart.sh, test-agent.sh, backup-agents.sh
++-- pipelines/                        # Legacy Lobster YAMLs (no executor)
++-- config/{*.plist}                  # LaunchAgent templates
++-- deploy/azure-setup.sh             # Azure Container Apps provisioner
++-- data/{feeds, cache, faiss, investigations}/  # Runtime (gitignored)
++-- tests/{scenarios, mocks, results, ioc-lists, test_*.py, run-frozen-ledger.sh}
++-- docs/{BUILD-GUIDE, DEPLOY-AZURE, RESEARCH-INTER-AGENT-ROUTING, PIPELINES}.md
 +-- install/{INSTALL.md, setup.sh}
++-- Dockerfile, docker-compose.yml, .github/workflows/deploy.yml
 ```
 
 ## What's Next
 
-Priority from earlier planning (remaining items):
-1. **Real-world integration** — Connect to actual SIEM (Sentinel API), ingest live alerts, test with real IOCs
-2. **Docker sandboxing** — Production deployment with container isolation
-3. **Monitoring/alerting** — Detect and report agent failures automatically
+Priority:
+1. **Azure deployment** — `azure_prompt.md` is the briefing for a Claude
+   Code session running on the App Service container shell. Decision
+   pending: separate Ollama Web App vs OpenAI embeddings.
+2. **Real-world integration** — Connect to a live SIEM (Sentinel API),
+   ingest live alerts, test with real IOCs.
+3. **Monitoring/alerting** — Detect and report agent failures
+   automatically.
 
-Other candidates:
-- Additional threat feeds or enrichment sources
-- Custom skills for agents
+Lower priority:
+- Wire up Slack (Socket Mode, env vars are already reserved)
+- Decide what to do with `pipelines/*.yaml` (delete or reimplement
+  in-process)
+- Export investigation as markdown/PDF
+- IOC quick-submit (batch enrich from pasted list)
+- GreyNoise as 5th IP threat-intel source
+- Custom skills per agent
 - Agent tuning based on operational feedback
-- Automated test result capture from Slack API or OpenClaw session logs
 
-Please read the relevant files from the repo before making changes. Always package deliverables as tar.gz for me to apply with `tar xzf`. Use `chmod +x` on scripts. No emojis in operational output — executive/professional formatting only.
+Please read the relevant files from the repo before making changes. No
+emojis in operational output — executive/professional formatting only.

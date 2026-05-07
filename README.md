@@ -2,18 +2,25 @@
 
 **by PUNCH Cyber**
 
-Shadowbox is a multi-agent SOC operations platform built on [OpenClaw](https://github.com/openclaw/openclaw). Seven specialist AI agents — each with a distinct personality and operational role — collaborate to triage alerts, enrich IOCs, respond to incidents, produce intelligence assessments, and write reports. The platform is operable through a web interface (Shadowbox) and will support Slack as a secondary interface.
+Shadowbox is a multi-agent SOC operations platform. Seven specialist AI
+agents — each with a distinct personality and operational role —
+collaborate to triage alerts, enrich IOCs, respond to incidents, produce
+intelligence assessments, and write reports. The whole system runs as a
+single FastAPI process; the in-process agent runner calls OpenAI
+directly. The web interface is the primary surface today, with Slack
+planned as a secondary interface.
 
-The backend system is called HOOK (Hunting, Orchestration & Operational Knowledge).
+The backend system is called HOOK (Hunting, Orchestration & Operational
+Knowledge).
 
 ## Architecture
 
 ```
-                   Shadowbox Web UI (:7799)
+                   Browser (http://localhost:7799)
                           |
-                   FastAPI + SSE Bridge
+                   FastAPI + SSE  (web/api/server.py)
                           |
-                   OpenClaw Gateway (:18789)
+                   Agent Runner   (web/api/agent_runner.py)
                           |
            +---------- Marshall ----------+
            |        (coordinator)         |
@@ -26,6 +33,10 @@ The backend system is called HOOK (Hunting, Orchestration & Operational Knowledg
                                                 Wells
                                               (log query)
 ```
+
+The agent runner streams over Server-Sent Events, handles tool calls
+(`exec`) inline against the local filesystem, and persists conversation
+state to SQLite (`data/hook-web.db`).
 
 ## The Team
 
@@ -64,32 +75,18 @@ enrich-domain.sh --source threatfox evil.com
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
-npm install -g openclaw
-brew install jq bind nmap whois
-pip3 install -r requirements.txt  # or use .venv
-
-# 2. Install Ollama (local embeddings)
-brew install ollama
-brew services start ollama
-ollama pull nomic-embed-text
-ollama pull qwen2.5:14b
-
-# 3. Configure
-cp config/openclaw.json.template ~/.openclaw/openclaw.json
-# Edit with your API keys, workspace paths, and gateway auth token
-
-# 4. Set up .env
-cp .env.example .env  # Add all API keys
-
-# 5. Start services
-openclaw gateway install && openclaw gateway start
-./scripts/restart.sh all
-
-# 6. Open Shadowbox
+git clone git@github.com:bwrisley/hook.git
+cd hook
+./install/setup.sh
 open http://localhost:7799
-# Default login: admin / shadowbox
+# Default login: admin / shadowbox  (change immediately)
 ```
+
+`setup.sh` is idempotent — it builds the Python venv, builds the
+frontend, prompts for any missing API keys, starts Ollama, pulls
+embedding models, and optionally installs a macOS LaunchAgent so the
+web UI auto-starts at login. See `install/INSTALL.md` for the long
+form, manual setup, and troubleshooting.
 
 ## Shadowbox Web UI
 
@@ -99,7 +96,7 @@ The web interface provides:
 - **Agents** — Live status of all 7 agents with message counts, token usage, and cost tracking.
 - **History** — Investigation lifecycle management. View findings, timelines, IOCs. Change status, add notes, link to conversations.
 - **Feeds** — Threat feed status and IOC watchlist. Watch IOCs for risk changes with automatic re-enrichment every 4 hours.
-- **Settings** — Health dashboard with service status for Gateway, Ollama, RAG, API keys, feeds, and database.
+- **Settings** — Health dashboard with service status for the agent provider, Ollama, RAG, API keys, feeds, and database.
 - **Audit** — Full audit log of agent calls with user, model, tokens, duration, and cost (admin only).
 - **Users** — User management with role-based access: admin and analyst (admin only).
 
@@ -120,31 +117,31 @@ Agents have access to behavioral memory powered by Ollama (nomic-embed-text) emb
 - **TTPs** — Historical technique observations for attribution analysis
 - **Findings** — Cross-investigation recall of past findings
 
-Feed-to-RAG pipeline runs automatically: `fetch-feeds.sh` pulls IOCs, `feed-to-rag.py` stores them with semantic embeddings, and the bridge auto-injects feed matches into specialist context.
+Feed-to-RAG pipeline runs automatically: `fetch-feeds.sh` pulls IOCs,
+`feed-to-rag.py` stores them with semantic embeddings, and the agent
+runner injects feed matches into specialist context.
 
 ## Automation
 
-macOS LaunchAgents (auto-start on boot):
+macOS LaunchAgents (auto-start on login):
 
 | Service | Schedule | Purpose |
 |---------|----------|---------|
-| Shadowbox Web | Always (KeepAlive) | Web UI on port 7799 |
-| OpenClaw Gateway | Always (KeepAlive) | Agent runtime on port 18789 |
+| Shadowbox Web | Always (KeepAlive) | Web UI + agent runner on port 7799 |
 | Daily Check | 6:00 AM | Fetch feeds, enrich new IOCs, check watchlist |
 | Watch Check | Every 4 hours | Re-enrich watched IOCs, detect risk changes |
 
 ```bash
-./scripts/restart.sh status  # Show all service status
-./scripts/restart.sh all     # Restart everything
-./scripts/restart.sh web     # Restart web only
+./scripts/restart.sh status   # Show all service status
+./scripts/restart.sh web      # Restart web service
+./scripts/restart.sh stop     # Stop web service
 ```
 
 ## Requirements
 
 - macOS with Apple Silicon (tested on M4 Max)
-- [OpenClaw](https://github.com/openclaw/openclaw) via npm
-- [Ollama](https://ollama.ai) with nomic-embed-text + qwen2.5:14b
-- Node.js 22+, Python 3.14+
+- Python 3.13+, Node.js 22+
+- [Ollama](https://ollama.ai) with nomic-embed-text (qwen2.5:14b optional)
 - OpenAI API key (gpt-4.1 + gpt-5)
 - Enrichment API keys: VirusTotal, Censys, AbuseIPDB, AlienVault OTX, Shodan (all free tier)
 
@@ -162,7 +159,7 @@ hook/
 +-- web/
 |   +-- api/
 |   |   +-- server.py          # FastAPI app
-|   |   +-- gateway_bridge.py  # OpenClaw CLI bridge with chain detection
+|   |   +-- agent_runner.py    # In-process OpenAI agent runner
 |   |   +-- auth.py            # User auth + sessions
 |   |   +-- watchlist.py       # IOC watchlist + notifications
 |   |   +-- sse.py             # SSE event formatting
@@ -187,10 +184,13 @@ hook/
 |   +-- restart.sh             # Service management
 |   +-- test-agent.sh          # Agent testing helper
 |   +-- backup-agents.sh       # SOUL.md/TOOLS.md backup
-+-- data/                      # Runtime data (gitignored)
-+-- config/                    # Config templates + LaunchAgent plists
-+-- tests/                     # Mocks, unit tests, scenarios
-+-- install/                   # Installation guide + setup script
++-- pipelines/                  # Legacy Lobster YAMLs (no longer executed)
++-- data/                       # Runtime data (gitignored)
++-- config/                     # LaunchAgent plists
++-- deploy/                     # Azure provisioning
++-- tests/                      # Mocks, unit tests, scenarios
++-- install/                    # Installation guide + setup script
++-- docs/                       # BUILD-GUIDE, DEPLOY-AZURE, research
 ```
 
 ## Phase History
@@ -203,6 +203,7 @@ hook/
 | 4 | Production hardening: input validation, rate limiting, structured logging, cron |
 | 5 | Config stabilization, validation tooling, Frozen Ledger test suite |
 | 6 | Shadowbox web UI, RAG memory, 7th agent, Ollama, multi-user auth, 8-source enrichment, watchlist monitoring, notification system, audit log, investigation lifecycle |
+| 7 | OpenClaw eliminated. Single FastAPI process with in-process agent runner calling OpenAI directly. Build/deploy collapsed to one container; Azure target switches from 3 container apps to 2 (web + optional Ollama). |
 
 ## License
 
