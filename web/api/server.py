@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sqlite3
 import uuid
 from contextlib import asynccontextmanager
@@ -35,14 +34,11 @@ from web.api.watchlist import WatchlistDB
 ROOT = Path(__file__).resolve().parents[2]
 DIST_DIR = ROOT / "web" / "dist"
 DATA_DIR = ROOT / "data"
-CONFIG_TEMPLATE = ROOT / "config" / "openclaw.json.template"
 INVESTIGATIONS_DIR = DATA_DIR / "investigations"
 
-SECRET_RE = re.compile(
-    r"(password|secret|token|api[_-]?key|client[_-]?secret)", re.IGNORECASE
-)
-
-# Agent definitions for static fallback when gateway is unreachable
+# Agent metadata used by /api/agents and /api/status. The runtime model
+# selection lives in web/api/agent_runner.py — this list carries the role
+# descriptions that the UI shows alongside live activity.
 AGENTS = [
     {"id": "coordinator", "model": "openai/gpt-4.1", "role": "Senior SOC coordinator. Calm, dry, decisive. Earns authority by knowing exactly who to hand work to and giving them everything they need."},
     {"id": "triage-analyst", "model": "openai/gpt-4.1", "role": "Tier 2 SOC analyst. Seen everything twice. Clinical, precise, no-nonsense. Calls what she sees and shows her work."},
@@ -97,19 +93,6 @@ def _validate_id(value: str, label: str = "ID") -> None:
     """Validate that an ID contains only safe characters."""
     if not value or not all(c.isalnum() or c in "-_" for c in value):
         raise HTTPException(status_code=400, detail=f"Invalid {label} format")
-
-
-def _mask_secrets(config: dict) -> dict:
-    """Recursively mask secret values in a config dict."""
-    masked = {}
-    for key, value in config.items():
-        if isinstance(value, dict):
-            masked[key] = _mask_secrets(value)
-        elif isinstance(value, str) and SECRET_RE.search(key):
-            masked[key] = "********" if value and not value.startswith("YOUR_") else value
-        else:
-            masked[key] = value
-    return masked
 
 
 # -- Web session DB --
@@ -793,25 +776,15 @@ def create_app() -> FastAPI:
         except Exception:
             checks["ollama"] = {"status": "unreachable", "models": []}
 
-        # API keys — check env vars, .env file, and openclaw config
+        # API keys — check env vars and .env file
         def _key_exists(name):
             if os.environ.get(name):
                 return True
-            # Check .env file
             env_file = ROOT / ".env"
             if env_file.exists():
                 for line in env_file.read_text().splitlines():
                     if line.startswith(f"{name}=") and len(line.split("=", 1)[1].strip()) > 0:
                         return True
-            # Check openclaw config
-            oc_config = Path.home() / ".openclaw" / "openclaw.json"
-            if oc_config.exists():
-                try:
-                    oc = json.loads(oc_config.read_text())
-                    if oc.get("env", {}).get(name):
-                        return True
-                except Exception:
-                    pass
             return False
 
         env_keys = {
@@ -1459,17 +1432,6 @@ Respond to the operator's latest message. Use the conversation context to resolv
             "total_iocs": total_iocs,
             "ioc_breakdown": ioc_breakdown,
         }
-
-    @app.get("/api/config")
-    async def config() -> dict[str, Any]:
-        """Return masked configuration (read-only)."""
-        if CONFIG_TEMPLATE.exists():
-            try:
-                raw = json.loads(CONFIG_TEMPLATE.read_text(encoding="utf-8"))
-                return {"config": _mask_secrets(raw), "source": "template"}
-            except json.JSONDecodeError:
-                return {"config": {}, "error": "Invalid JSON in config template"}
-        return {"config": {}, "error": "Config template not found"}
 
     @app.get("/api/conversations")
     async def conversations(request: Request) -> dict[str, Any]:

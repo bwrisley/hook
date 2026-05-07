@@ -24,17 +24,12 @@ function formatCost(usd) {
 
 export default function SettingsPage() {
   const [health, setHealth] = useState(null)
-  const [config, setConfig] = useState(null)
   const [loading, setLoading] = useState(true)
 
   const load = async () => {
     try {
-      const [healthRes, configRes] = await Promise.all([
-        api.get('/api/health'),
-        api.get('/api/config'),
-      ])
+      const healthRes = await api.get('/api/health')
       setHealth(healthRes.data)
-      setConfig(configRes.data.config || {})
     } catch { /* offline */ }
     setLoading(false)
   }
@@ -57,15 +52,15 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {/* Gateway */}
+        {/* Agent Provider */}
         <div className="panel p-5">
           <div className="flex items-center justify-between mb-3">
-            <span className="font-mono text-xs uppercase tracking-[0.16em] text-accent">OpenClaw Gateway</span>
-            <StatusBadge ok={checks.gateway?.status === 'ok'} />
+            <span className="font-mono text-xs uppercase tracking-[0.16em] text-accent">Agent Provider</span>
+            <StatusBadge ok={checks.agent_provider?.status === 'ok'} />
           </div>
           <div className="kv">
-            <span className="font-mono text-xs text-dim">Port</span>
-            <span className="font-mono text-xs text-text">{checks.gateway?.port}</span>
+            <span className="font-mono text-xs text-dim">Provider</span>
+            <span className="font-mono text-xs text-text">{checks.agent_provider?.provider || 'unknown'}</span>
           </div>
         </div>
 
@@ -162,18 +157,6 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
-
-      {/* Config (collapsed) */}
-      <details className="mt-6 panel">
-        <summary className="cursor-pointer border-b border-border px-5 py-3 font-mono text-xs uppercase tracking-[0.18em] text-accent">
-          Configuration (Read-Only)
-        </summary>
-        <div className="max-h-96 overflow-auto p-4">
-          <pre className="font-mono text-xs text-dim whitespace-pre-wrap">
-            {config ? JSON.stringify(config, null, 2) : 'Not available'}
-          </pre>
-        </div>
-      </details>
     </div>
   )
 }

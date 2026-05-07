@@ -60,7 +60,7 @@ export default function InvestigatePage() {
         // Also load messages immediately since navigate may not trigger useEffect fast enough
         loadMessages(items[0].conversation_id)
       }
-    } catch { /* gateway may be offline */ }
+    } catch { /* api may be offline */ }
   }
 
   const loadMessages = async (convId) => {
