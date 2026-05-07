@@ -1,268 +1,323 @@
 #!/bin/bash
-# HOOK Setup Script — Automated installation for macOS
-# Usage: cd ~/PROJECTS/hook && ./install/setup.sh
+# HOOK / Shadowbox setup script — automated installation for macOS.
 #
-# This script automates file copy, placeholder replacement, and tool installation.
-# Slack app setup and API key entry still require manual steps.
-
+# Usage:
+#   cd ~/projects/hook && ./install/setup.sh
+#
+# Idempotent: re-running upgrades dependencies and refreshes the build
+# without clobbering .env, the SQLite DB, or pulled Ollama models.
+#
 set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-OPENCLAW_DIR="$HOME/.openclaw"
-CONFIG_FILE="$OPENCLAW_DIR/openclaw.json"
+VENV_DIR="$HOOK_DIR/.venv"
+ENV_FILE="$HOOK_DIR/.env"
+ENV_TEMPLATE="$HOOK_DIR/.env.example"
+WEB_DIR="$HOOK_DIR/web"
+LOG_DIR="$HOME/.openclaw/logs/hook"
+LAUNCH_AGENT="$HOME/Library/LaunchAgents/com.punchcyber.hook.web.plist"
+PORT="${HOOK_WEB_PORT:-7799}"
 
 echo ""
-echo "HOOK Setup -- Hunting, Orchestration & Operational Knowledge"
-echo "   by PUNCH Cyber"
+echo "Shadowbox setup -- PUNCH Cyber"
 echo ""
-echo "   HOOK repo:       $HOOK_DIR"
-echo "   OpenClaw config: $OPENCLAW_DIR"
+echo "  Repo:    $HOOK_DIR"
+echo "  Venv:    $VENV_DIR"
+echo "  .env:    $ENV_FILE"
+echo "  Port:    $PORT"
 echo ""
 
 # --- Prerequisites --------------------------------------------------------
 
 echo "Checking prerequisites..."
-echo ""
 
 MISSING=0
 
-if ! command -v openclaw >/dev/null 2>&1; then
-    echo "  [FAIL] OpenClaw not installed"
-    echo "         Fix: npm install -g @openclaw/openclaw"
-    MISSING=1
-else
-    echo "  [OK]   OpenClaw $(openclaw --version 2>/dev/null | head -1 || echo 'installed')"
-fi
-
-if ! command -v git >/dev/null 2>&1; then
-    echo "  [FAIL] Git not installed"
-    echo "         Fix: brew install git"
-    MISSING=1
-else
-    echo "  [OK]   Git $(git --version | awk '{print $3}')"
-fi
-
-if ! command -v node >/dev/null 2>&1; then
-    echo "  [FAIL] Node.js not installed"
-    echo "         Fix: brew install node"
-    MISSING=1
-else
-    echo "  [OK]   Node.js $(node --version)"
-fi
-
 if ! command -v brew >/dev/null 2>&1; then
-    echo "  [FAIL] Homebrew not installed"
-    echo "         Fix: https://brew.sh"
+    echo "  [FAIL] Homebrew not installed -- see https://brew.sh"
     MISSING=1
 else
     echo "  [OK]   Homebrew $(brew --version | head -1 | awk '{print $2}')"
 fi
 
+if ! command -v git >/dev/null 2>&1; then
+    echo "  [FAIL] git not installed -- run: brew install git"
+    MISSING=1
+else
+    echo "  [OK]   git $(git --version | awk '{print $3}')"
+fi
+
+PY=""
+for candidate in python3.14 python3.13 python3; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        PY_VER=$("$candidate" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
+        case "$PY_VER" in
+            3.13|3.14|3.15|3.16) PY="$candidate"; break ;;
+        esac
+    fi
+done
+if [ -z "$PY" ]; then
+    echo "  [FAIL] Python 3.13+ not found -- run: brew install python@3.13"
+    MISSING=1
+else
+    echo "  [OK]   $PY ($($PY --version | awk '{print $2}'))"
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+    echo "  [FAIL] node not installed -- run: brew install node@22"
+    MISSING=1
+else
+    NODE_MAJOR=$(node --version | sed -E 's/^v([0-9]+).*/\1/')
+    if [ "$NODE_MAJOR" -lt 20 ]; then
+        echo "  [FAIL] node $NODE_MAJOR is too old -- need 20+, run: brew install node@22"
+        MISSING=1
+    else
+        echo "  [OK]   node $(node --version)"
+    fi
+fi
+
+if ! command -v ollama >/dev/null 2>&1; then
+    echo "  [WARN] ollama not installed -- run: brew install ollama"
+    echo "         (Shadowbox will still start; embeddings will be unavailable)"
+else
+    echo "  [OK]   ollama installed"
+fi
+
 if [ "$MISSING" -gt 0 ]; then
     echo ""
-    echo "[FAIL] Missing prerequisites. Install them and re-run this script."
+    echo "[FAIL] Missing prerequisites. Install them and re-run."
     exit 1
 fi
 
 echo ""
 
-# --- Security Tools -------------------------------------------------------
+# --- Security CLI tools ---------------------------------------------------
 
-echo "Checking security tools..."
-echo ""
+echo "Checking enrichment CLI tools..."
 
-TOOLS_TO_INSTALL=""
-
-if ! command -v jq >/dev/null 2>&1; then
-    echo "  [ ]    jq -- not installed"
-    TOOLS_TO_INSTALL="$TOOLS_TO_INSTALL jq"
-else
-    echo "  [OK]   jq $(jq --version 2>/dev/null)"
-fi
-
-if ! command -v dig >/dev/null 2>&1; then
-    echo "  [ ]    dig -- not installed"
-    TOOLS_TO_INSTALL="$TOOLS_TO_INSTALL bind"
-else
-    echo "  [OK]   dig installed"
-fi
-
-if ! command -v nmap >/dev/null 2>&1; then
-    echo "  [ ]    nmap -- not installed"
-    TOOLS_TO_INSTALL="$TOOLS_TO_INSTALL nmap"
-else
-    echo "  [OK]   nmap $(nmap --version 2>&1 | head -1 | awk '{print $3}')"
-fi
-
-if ! command -v whois >/dev/null 2>&1; then
-    echo "  [ ]    whois -- not installed"
-    TOOLS_TO_INSTALL="$TOOLS_TO_INSTALL whois"
-else
-    echo "  [OK]   whois installed"
-fi
-
-if [ -n "$TOOLS_TO_INSTALL" ]; then
-    echo ""
-    read -rp "Install missing tools via brew? ($TOOLS_TO_INSTALL) [Y/n]: " INSTALL_TOOLS
-    if [ "${INSTALL_TOOLS:-Y}" != "n" ] && [ "${INSTALL_TOOLS:-Y}" != "N" ]; then
-        # shellcheck disable=SC2086
-        brew install $TOOLS_TO_INSTALL
-        echo "  [OK]   Tools installed"
+TO_INSTALL=""
+for cmd_pkg in "jq:jq" "dig:bind" "whois:whois" "nmap:nmap"; do
+    cmd="${cmd_pkg%:*}"
+    pkg="${cmd_pkg#*:}"
+    if command -v "$cmd" >/dev/null 2>&1; then
+        echo "  [OK]   $cmd"
     else
-        echo "  [WARN] Skipped -- some agents may not work correctly without these tools"
-    fi
-fi
-
-echo ""
-
-# --- Make Scripts Executable -----------------------------------------------
-
-chmod +x "$HOOK_DIR/scripts/"*.sh 2>/dev/null || true
-chmod +x "$HOOK_DIR/config/build.sh" 2>/dev/null || true
-echo "[OK] Scripts marked executable"
-
-# --- Config Setup ----------------------------------------------------------
-
-echo ""
-
-# Backup existing config
-if [ -f "$CONFIG_FILE" ]; then
-    BACKUP="$CONFIG_FILE.backup.$(date +%Y%m%d-%H%M%S)"
-    cp "$CONFIG_FILE" "$BACKUP"
-    echo "[OK] Backed up existing config to:"
-    echo "     $BACKUP"
-fi
-
-# Copy template
-cp "$HOOK_DIR/config/openclaw.json.template" "$CONFIG_FILE"
-echo "[OK] Copied config template"
-
-# Replace HOOK_REPO_PATH
-sed -i '' "s|HOOK_REPO_PATH|$HOOK_DIR|g" "$CONFIG_FILE"
-echo "[OK] Set workspace paths to $HOOK_DIR"
-
-# Prompt for Slack channel name
-echo ""
-echo "--- Slack Channel ---"
-echo ""
-read -rp "  Slack channel name [#hook]: " CHANNEL_NAME
-CHANNEL_NAME="${CHANNEL_NAME:-#hook}"
-# Ensure it starts with #
-if [[ "$CHANNEL_NAME" != \#* ]]; then
-    CHANNEL_NAME="#$CHANNEL_NAME"
-fi
-sed -i '' "s|HOOK_CHANNEL_NAME|$CHANNEL_NAME|g" "$CONFIG_FILE"
-echo "    [OK] Channel set to $CHANNEL_NAME"
-
-# Prompt for API keys
-echo ""
-echo "--- API Keys ---"
-echo "Enter your API keys (leave blank to skip and edit later):"
-echo ""
-
-read -rp "  VirusTotal API Key: " VT_KEY
-if [ -n "$VT_KEY" ]; then
-    sed -i '' "s|YOUR_VIRUSTOTAL_API_KEY|$VT_KEY|g" "$CONFIG_FILE"
-    echo "    [OK] Set"
-fi
-
-read -rp "  Censys API ID: " CENSYS_ID
-if [ -n "$CENSYS_ID" ]; then
-    sed -i '' "s|YOUR_CENSYS_API_ID|$CENSYS_ID|g" "$CONFIG_FILE"
-    echo "    [OK] Set"
-fi
-
-read -rp "  Censys API Secret: " CENSYS_SECRET
-if [ -n "$CENSYS_SECRET" ]; then
-    sed -i '' "s|YOUR_CENSYS_API_SECRET|$CENSYS_SECRET|g" "$CONFIG_FILE"
-    echo "    [OK] Set"
-fi
-
-read -rp "  AbuseIPDB API Key: " ABUSE_KEY
-if [ -n "$ABUSE_KEY" ]; then
-    sed -i '' "s|YOUR_ABUSEIPDB_API_KEY|$ABUSE_KEY|g" "$CONFIG_FILE"
-    echo "    [OK] Set"
-fi
-
-# --- Validation ------------------------------------------------------------
-
-echo ""
-echo "--- Validation ---"
-
-# Check for remaining placeholders
-REMAINING=$(grep -c "YOUR_\|HOOK_REPO_PATH\|HOOK_CHANNEL_NAME" "$CONFIG_FILE" 2>/dev/null || true)
-if [ "$REMAINING" -gt 0 ]; then
-    echo ""
-    echo "  [WARN] $REMAINING placeholder(s) still need to be replaced:"
-    grep -n "YOUR_\|HOOK_REPO_PATH\|HOOK_CHANNEL_NAME" "$CONFIG_FILE" | sed 's/^/         /'
-else
-    echo "  [OK]   All placeholders replaced"
-fi
-
-# Check Slack tokens
-SLACK_REMAINING=$(grep -c "xoxb-YOUR\|xapp-YOUR" "$CONFIG_FILE" 2>/dev/null || true)
-if [ "$SLACK_REMAINING" -gt 0 ]; then
-    echo "  [WARN] Slack tokens still need to be configured (see Step 5 in INSTALL.md)"
-else
-    echo "  [OK]   Slack tokens configured"
-fi
-
-# Validate JSON
-if command -v python3 >/dev/null 2>&1; then
-    if python3 -c "import json; json.load(open('$CONFIG_FILE'))" 2>/dev/null; then
-        echo "  [OK]   Config is valid JSON"
-    else
-        echo "  [FAIL] Config has JSON syntax errors -- edit $CONFIG_FILE and fix"
-    fi
-fi
-
-# Check agent workspaces exist
-AGENT_COUNT=0
-for agent in coordinator triage-analyst osint-researcher incident-responder threat-intel report-writer; do
-    if [ -d "$HOOK_DIR/workspaces/$agent" ] && [ -f "$HOOK_DIR/workspaces/$agent/SOUL.md" ]; then
-        AGENT_COUNT=$((AGENT_COUNT + 1))
-    else
-        echo "  [FAIL] Missing workspace: $agent"
+        echo "  [ ]    $cmd not installed (brew package: $pkg)"
+        TO_INSTALL="$TO_INSTALL $pkg"
     fi
 done
-echo "  [OK]   $AGENT_COUNT/6 agent workspaces found"
 
-# Check Lobster
-if command -v lobster >/dev/null 2>&1; then
-    echo "  [OK]   Lobster CLI installed (deterministic pipelines available)"
-else
-    echo "  [INFO] Lobster not installed (optional -- run: npm install -g @openclaw/lobster)"
-fi
-
-# --- Done ------------------------------------------------------------------
-
-echo ""
-echo "--- Next Steps ---"
-echo ""
-if [ "$SLACK_REMAINING" -gt 0 ]; then
-    echo "  1. Create Slack app and add tokens to $CONFIG_FILE"
-    echo "     (see Step 5 in $HOOK_DIR/install/INSTALL.md)"
+if [ -n "$TO_INSTALL" ]; then
     echo ""
-    echo "  2. Start gateway:"
-    echo "       openclaw gateway install"
-    echo "       openclaw gateway start"
-else
-    echo "  1. Start gateway:"
-    echo "       openclaw gateway install"
-    echo "       openclaw gateway start"
+    read -rp "Install missing tools via brew?$TO_INSTALL [Y/n]: " ANSWER
+    if [ "${ANSWER:-Y}" != "n" ] && [ "${ANSWER:-Y}" != "N" ]; then
+        # shellcheck disable=SC2086
+        brew install $TO_INSTALL
+    else
+        echo "  [WARN] skipped -- enrichment scripts may fail without these"
+    fi
 fi
+
 echo ""
-echo "  Then verify:"
-echo "       openclaw agents list --bindings"
-echo "       openclaw channels status --probe"
+
+# --- Python venv ----------------------------------------------------------
+
+echo "Setting up Python environment..."
+if [ ! -d "$VENV_DIR" ]; then
+    "$PY" -m venv "$VENV_DIR"
+    echo "  [OK]   created venv at $VENV_DIR"
+else
+    echo "  [OK]   venv exists"
+fi
+
+"$VENV_DIR/bin/pip" install --upgrade pip --quiet
+"$VENV_DIR/bin/pip" install -r "$HOOK_DIR/requirements.txt" --quiet
+echo "  [OK]   Python dependencies installed"
+
 echo ""
-echo "  Validate environment:"
-echo "       ./scripts/health-check.sh"
-echo "       ./scripts/validate-config.sh"
+
+# --- Frontend -------------------------------------------------------------
+
+echo "Building the frontend..."
+cd "$WEB_DIR"
+if [ ! -d "node_modules" ]; then
+    npm ci
+else
+    npm install --no-audit --no-fund --silent
+fi
+npm run build
+cd "$HOOK_DIR"
+echo "  [OK]   web/dist/ built"
+
 echo ""
-echo "  Test in Slack:"
-echo "       @HOOK Hello, are you online?"
+
+# --- .env -----------------------------------------------------------------
+
+echo "Configuring .env..."
+
+if [ ! -f "$ENV_FILE" ]; then
+    cp "$ENV_TEMPLATE" "$ENV_FILE"
+    echo "  [OK]   created .env from template"
+else
+    echo "  [OK]   .env already exists (keeping existing values)"
+fi
+
+# Helper: set a key in .env iff it's currently blank
+set_env_if_blank() {
+    local key="$1"
+    local value="$2"
+    [ -z "$value" ] && return 0
+    # If the line exists and is blank, replace it. If it doesn't exist, append.
+    if grep -qE "^${key}=" "$ENV_FILE"; then
+        local current
+        current=$(grep -E "^${key}=" "$ENV_FILE" | head -1 | cut -d= -f2-)
+        if [ -z "$current" ]; then
+            # macOS sed needs the empty backup arg
+            sed -i '' "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+            echo "    [OK] $key set"
+        else
+            echo "    [SKIP] $key already set"
+        fi
+    else
+        printf '\n%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+        echo "    [OK] $key appended"
+    fi
+}
+
+prompt_key() {
+    local label="$1"
+    local var="$2"
+    local input
+    read -rp "    $label: " input
+    set_env_if_blank "$var" "$input"
+}
+
 echo ""
-echo "  Full guide: $HOOK_DIR/install/INSTALL.md"
+echo "  --- API keys ---"
+echo "  Press Enter to skip any key; you can edit .env manually later."
 echo ""
-echo "HOOK setup complete."
+prompt_key "OpenAI API key (required)" OPENAI_API_KEY
+prompt_key "VirusTotal API key" VT_API_KEY
+prompt_key "Censys API ID" CENSYS_API_ID
+prompt_key "Censys API Secret" CENSYS_API_SECRET
+prompt_key "AbuseIPDB API key" ABUSEIPDB_API_KEY
+prompt_key "AlienVault OTX API key" OTX_API_KEY
+prompt_key "Shodan API key" SHODAN_API_KEY
+
+echo ""
+
+# --- Ollama ---------------------------------------------------------------
+
+if command -v ollama >/dev/null 2>&1; then
+    echo "Setting up Ollama..."
+    if ! curl -s --max-time 2 http://localhost:11434/api/tags >/dev/null 2>&1; then
+        echo "  [INFO] starting ollama brew service..."
+        brew services start ollama >/dev/null 2>&1 || true
+        sleep 3
+    fi
+    if curl -s --max-time 2 http://localhost:11434/api/tags >/dev/null 2>&1; then
+        echo "  [OK]   ollama reachable on :11434"
+
+        EXISTING=$(curl -s http://localhost:11434/api/tags | "$VENV_DIR/bin/python" -c \
+            "import json,sys; d=json.load(sys.stdin); print(' '.join(m['name'] for m in d.get('models',[])))" 2>/dev/null || echo "")
+
+        if echo "$EXISTING" | grep -q "nomic-embed-text"; then
+            echo "  [OK]   nomic-embed-text present"
+        else
+            read -rp "  Pull nomic-embed-text (embeddings, ~270MB)? [Y/n]: " PULL
+            if [ "${PULL:-Y}" != "n" ] && [ "${PULL:-Y}" != "N" ]; then
+                ollama pull nomic-embed-text
+            fi
+        fi
+
+        if echo "$EXISTING" | grep -q "qwen2.5:14b"; then
+            echo "  [OK]   qwen2.5:14b present"
+        else
+            read -rp "  Pull qwen2.5:14b (local chat model, ~9GB)? [y/N]: " PULL
+            if [ "${PULL:-N}" = "y" ] || [ "${PULL:-N}" = "Y" ]; then
+                ollama pull qwen2.5:14b
+            else
+                echo "  [SKIP] qwen2.5:14b -- you can pull later with: ollama pull qwen2.5:14b"
+            fi
+        fi
+    else
+        echo "  [WARN] ollama not reachable -- skipping model setup"
+    fi
+    echo ""
+fi
+
+# --- LaunchAgent (optional) ----------------------------------------------
+
+echo "macOS LaunchAgent..."
+if [ -f "$LAUNCH_AGENT" ]; then
+    echo "  [OK]   $LAUNCH_AGENT already installed"
+else
+    read -rp "  Install LaunchAgent so the web UI starts at login? [Y/n]: " INSTALL_LA
+    if [ "${INSTALL_LA:-Y}" != "n" ] && [ "${INSTALL_LA:-Y}" != "N" ]; then
+        mkdir -p "$LOG_DIR"
+        sed -e "s|HOOK_REPO_PATH|$HOOK_DIR|g" \
+            -e "s|HOOK_LOG_PATH|$LOG_DIR|g" \
+            "$HOOK_DIR/config/com.punchcyber.hook.web.plist" > "$LAUNCH_AGENT"
+        launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT" 2>/dev/null || true
+        echo "  [OK]   LaunchAgent installed and loaded"
+    else
+        echo "  [SKIP] LaunchAgent not installed -- start manually with ./scripts/restart.sh web"
+    fi
+fi
+
+echo ""
+
+# --- Validation -----------------------------------------------------------
+
+echo "Validating..."
+
+# scripts executable
+chmod +x "$HOOK_DIR/scripts/"*.sh 2>/dev/null || true
+echo "  [OK]   scripts/*.sh executable"
+
+# data dirs
+mkdir -p "$HOOK_DIR/data/feeds" "$HOOK_DIR/data/cache" \
+         "$HOOK_DIR/data/faiss" "$HOOK_DIR/data/investigations" \
+         "$HOOK_DIR/data/reports"
+echo "  [OK]   data/ directories present"
+
+# OpenAI key sanity
+if grep -qE "^OPENAI_API_KEY=.+" "$ENV_FILE"; then
+    echo "  [OK]   OPENAI_API_KEY set"
+else
+    echo "  [WARN] OPENAI_API_KEY not set in .env -- agents will not work"
+fi
+
+# Try to start (or restart) the web service if the LaunchAgent is loaded
+if launchctl list | grep -q "com.punchcyber.hook.web"; then
+    "$HOOK_DIR/scripts/restart.sh" web >/dev/null 2>&1 || true
+    sleep 2
+fi
+
+# Health check
+if curl -s --max-time 5 "http://localhost:$PORT/api/status" >/dev/null 2>&1; then
+    echo "  [OK]   web service responding on :$PORT"
+    HEALTHY=1
+else
+    echo "  [INFO] web service not responding yet -- start it manually below"
+    HEALTHY=0
+fi
+
+echo ""
+echo "--- Done ---"
+echo ""
+
+if [ "$HEALTHY" = "1" ]; then
+    echo "  Open: http://localhost:$PORT"
+    echo "  Login: admin / shadowbox  (change immediately under Settings -> Users)"
+else
+    echo "  Start the web service:"
+    echo "    ./scripts/restart.sh web"
+    echo "  Then open: http://localhost:$PORT"
+fi
+
+echo ""
+echo "  Status:  ./scripts/restart.sh status"
+echo "  Logs:    tail -f $LOG_DIR/web-stderr.log"
+echo "  Guide:   $HOOK_DIR/install/INSTALL.md"
+echo ""
